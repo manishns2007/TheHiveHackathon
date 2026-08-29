@@ -586,6 +586,10 @@ function PitchRoomView({ user, go, sessionId }) {
   const [showT, setShowT] = useState(false)
   const [textMode, setTextMode] = useState(false)
   const [textVal, setTextVal] = useState('')
+  const [timerMode, setTimerMode] = useState('off')
+  const [remaining, setRemaining] = useState(0)
+  const [timerActive, setTimerActive] = useState(false)
+  const voiceMapRef = useRef({})
 
   const recogRef = useRef(null); const finalRef = useRef(''); const interimRef = useRef('')
   const interruptedRef = useRef(false); const maxTimerRef = useRef(null); const sendingRef = useRef(false)
@@ -600,10 +604,42 @@ function PitchRoomView({ user, go, sessionId }) {
   }, [sessionId])
   useEffect(() => { const t = setInterval(() => setElapsed((e) => e + 1), 1000); return () => clearInterval(t) }, [])
 
-  const speak = (text, onDone) => {
+  // assign each judge a distinct voice + pitch/rate
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis || personas.length === 0) return
+    const profiles = [{ pitch: 0.8, rate: 0.98 }, { pitch: 1.2, rate: 1.07 }, { pitch: 1.0, rate: 0.9 }, { pitch: 0.9, rate: 1.0 }]
+    const build = () => {
+      const voices = window.speechSynthesis.getVoices() || []
+      const en = voices.filter((v) => /en[-_]/i.test(v.lang))
+      const pool = en.length ? en : voices
+      const map = {}
+      personas.forEach((p, i) => { map[p.id] = { voice: pool.length ? pool[i % pool.length] : null, ...profiles[i % profiles.length] } })
+      voiceMapRef.current = map
+    }
+    build(); window.speechSynthesis.onvoiceschanged = build
+    return () => { try { window.speechSynthesis.onvoiceschanged = null } catch (e) {} }
+  }, [personas])
+
+  // optional round countdown
+  useEffect(() => {
+    if (!timerActive) return
+    if (remaining <= 0) { setTimerActive(false); toast('Time! The panel is wrapping up.'); endPitch(); return }
+    const t = setTimeout(() => setRemaining((r) => r - 1), 1000)
+    return () => clearTimeout(t)
+  }, [timerActive, remaining])
+
+  const startTimer = (m) => {
+    if (m === 'off') { setTimerMode('off'); setTimerActive(false); setRemaining(0) }
+    else { setTimerMode(m); setRemaining(parseInt(m, 10)); setTimerActive(true) }
+  }
+
+  const speak = (text, personaId, onDone) => {
     if (ttsOnRef.current && typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel()
-      const u = new SpeechSynthesisUtterance(text); u.rate = 1.04; u.pitch = 0.96
+      const u = new SpeechSynthesisUtterance(text)
+      const prof = voiceMapRef.current[personaId]
+      if (prof) { if (prof.voice) u.voice = prof.voice; u.pitch = prof.pitch; u.rate = prof.rate }
+      else { u.rate = 1.04; u.pitch = 0.96 }
       u.onend = onDone; u.onerror = onDone; window.speechSynthesis.speak(u)
     } else { setTimeout(onDone, Math.min(7000, 1400 + text.length * 32)) }
   }
@@ -625,7 +661,7 @@ function PitchRoomView({ user, go, sessionId }) {
       const avatar = pm.avatar_url || personas.find((p) => p.id === pm.persona_id)?.avatar_url
       setCaption({ who: 'persona', name: pm.personaName, role: pm.personaRole, avatar, text: pm.content, question: pm.question, contradictions: pm.contradictions, beliefChanges: pm.beliefChanges, interrupted })
       setPhase('speaking')
-      speak(pm.content + (pm.question?.text ? '. ' + pm.question.text : ''), () => { setSpeaker(null); setPhase('idle') })
+      speak(pm.content + (pm.question?.text ? '. ' + pm.question.text : ''), pm.persona_id, () => { setSpeaker(null); setPhase('idle') })
     } catch (e) { toast.error('The panel is experiencing a brief delay. Try again.'); setPhase('idle') }
     finally { sendingRef.current = false }
   }
@@ -685,6 +721,14 @@ function PitchRoomView({ user, go, sessionId }) {
           <div className="flex items-center gap-4"><button onClick={() => go('dashboard')}><Logo className="text-[15px]" /></button><span className="text-sm text-muted-foreground hidden md:block">{session.panel_name}</span></div>
           <div className="flex items-center gap-2">
             <span className="text-xs tabular-nums text-muted-foreground flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {mmss}</span>
+            {timerActive ? (
+              <span className={`text-xs font-semibold tabular-nums px-2 py-0.5 rounded-md flex items-center gap-1 ${remaining <= 10 ? 'text-red-300 bg-red-500/15 animate-pulse' : remaining <= 30 ? 'text-amber-300 bg-amber-500/15' : 'text-emerald-300 bg-emerald-500/10'}`}>{String(Math.floor(remaining / 60))}:{String(remaining % 60).padStart(2, '0')}<button onClick={() => startTimer('off')} className="ml-1 opacity-60 hover:opacity-100">✕</button></span>
+            ) : (
+              <div className="hidden sm:flex items-center gap-1 border border-border rounded-md p-0.5">
+                <span className="text-[10px] text-muted-foreground/70 px-1">Round</span>
+                {['60', '90'].map((m) => <button key={m} onClick={() => startTimer(m)} className="text-[10px] px-1.5 py-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary">{m}s</button>)}
+              </div>
+            )}
             <Badge variant="outline" className="border-brand/40 text-brand bg-brand/10 text-[10px]">AI SIMULATION</Badge>
             <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setTtsOn((v) => !v)} title="Panel voice">{ttsOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-muted-foreground" />}</Button>
             <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setShowT((v) => !v)} title="Transcript"><FileText className={`w-4 h-4 ${showT ? 'text-brand' : ''}`} /></Button>

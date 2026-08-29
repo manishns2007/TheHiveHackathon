@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
@@ -25,13 +24,13 @@ const DIM_LABELS = {
 const DIM_ORDER = ['problem', 'market', 'founder', 'differentiation', 'defensibility', 'distribution', 'economics', 'scalability', 'novelty', 'feasibility']
 
 const VERDICT_COLOR = {
-  'Strong Interest': 'text-emerald-700 border-emerald-200 bg-emerald-50',
-  'Interest': 'text-emerald-700 border-emerald-200 bg-emerald-50',
-  'Conditional Interest': 'text-amber-700 border-amber-200 bg-amber-50',
-  'Needs More Evidence': 'text-amber-700 border-amber-200 bg-amber-50',
-  'Pass': 'text-red-700 border-red-200 bg-red-50',
+  'Strong Interest': 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
+  'Interest': 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
+  'Conditional Interest': 'text-amber-300 border-amber-500/30 bg-amber-500/10',
+  'Needs More Evidence': 'text-amber-300 border-amber-500/30 bg-amber-500/10',
+  'Pass': 'text-red-300 border-red-500/30 bg-red-500/10',
 }
-const SEV_COLOR = { P0: 'text-red-700 border-red-200 bg-red-50', P1: 'text-amber-700 border-amber-200 bg-amber-50', P2: 'text-sky-700 border-sky-200 bg-sky-50' }
+const SEV_COLOR = { P0: 'text-red-300 border-red-500/30 bg-red-500/10', P1: 'text-amber-300 border-amber-500/30 bg-amber-500/10', P2: 'text-sky-300 border-sky-500/30 bg-sky-500/10' }
 
 const api = async (path, opts = {}) => {
   const res = await fetch('/api' + path, {
@@ -44,7 +43,6 @@ const api = async (path, opts = {}) => {
   return data
 }
 
-// signature Mintlify flowing gradient lines
 function FlowLines({ className = '', count = 16, opacity = 0.55 }) {
   return (
     <svg className={className} viewBox="0 0 600 400" fill="none" preserveAspectRatio="xMidYMid slice" aria-hidden>
@@ -61,7 +59,7 @@ function FlowLines({ className = '', count = 16, opacity = 0.55 }) {
           d={`M -60 ${90 + i * 12} C 160 ${40 + i * 15}, 380 ${330 - i * 7}, 660 ${100 + i * 11}`}
           stroke="url(#flowg)"
           strokeWidth="1.1"
-          opacity={Math.max(0.06, opacity - i * 0.03)}
+          opacity={Math.max(0.05, opacity - i * 0.03)}
         />
       ))}
     </svg>
@@ -72,7 +70,7 @@ function Logo({ className = 'text-[17px]' }) {
   return (
     <div className="flex items-center gap-2 select-none">
       <div className="w-6 h-6 rounded-[7px] brand-gradient grid place-items-center">
-        <Play className="w-3 h-3 text-white" fill="currentColor" />
+        <Play className="w-3 h-3 text-black" fill="currentColor" />
       </div>
       <span className={`font-semibold tracking-tight ${className}`}>echoclash</span>
     </div>
@@ -83,8 +81,8 @@ function SectionTitle({ eyebrow, title, sub, center }) {
   return (
     <div className={center ? 'text-center max-w-2xl mx-auto' : 'section-bar'}>
       {eyebrow && <div className="text-sm font-medium text-brand mb-2">{eyebrow}</div>}
-      <h2 className="text-3xl md:text-[40px] font-semibold tracking-tight leading-tight text-neutral-900">{title}</h2>
-      {sub && <p className="text-neutral-500 mt-3 text-lg">{sub}</p>}
+      <h2 className="text-3xl md:text-[40px] font-semibold tracking-tight leading-tight text-foreground">{title}</h2>
+      {sub && <p className="text-muted-foreground mt-3 text-lg">{sub}</p>}
     </div>
   )
 }
@@ -111,14 +109,14 @@ export default function App() {
   const login = (u) => { localStorage.setItem('ec_user', JSON.stringify(u)); setUser(u); go('dashboard') }
   const logout = () => { localStorage.removeItem('ec_user'); setUser(null); go('landing') }
 
-  if (!booted) return <div className="min-h-screen grid place-items-center"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
+  if (!booted) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
 
   const guarded = ['dashboard', 'startup-new', 'panels', 'pitch', 'debrief']
   if (guarded.includes(route.name) && !user) return <LoginView onLogin={login} go={go} />
 
   return (
     <>
-      <Toaster theme="light" position="top-center" richColors />
+      <Toaster theme="dark" position="top-center" richColors />
       {route.name === 'landing' && <LandingView go={go} />}
       {route.name === 'login' && <LoginView onLogin={login} go={go} />}
       {route.name === 'dashboard' && <DashboardView user={user} go={go} logout={logout} />}
@@ -133,61 +131,55 @@ export default function App() {
 // ================================================================== LANDING
 function LandingView({ go }) {
   return (
-    <div className="min-h-screen bg-white text-neutral-900">
-      {/* NAV */}
-      <nav className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-neutral-100">
+    <div className="min-h-screen bg-background text-foreground">
+      <nav className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b border-border">
         <div className="container flex items-center justify-between h-[68px]">
           <Logo />
-          <div className="hidden md:flex items-center gap-7 text-[15px] text-neutral-600">
-            <button onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center gap-1 hover:text-neutral-900">Product <ChevronDown className="w-3.5 h-3.5" /></button>
-            <button onClick={() => document.getElementById('panels')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center gap-1 hover:text-neutral-900">Panels <ChevronDown className="w-3.5 h-3.5" /></button>
-            <button onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })} className="hover:text-neutral-900">How it works</button>
+          <div className="hidden md:flex items-center gap-7 text-[15px] text-muted-foreground">
+            <button onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center gap-1 hover:text-foreground">Product <ChevronDown className="w-3.5 h-3.5" /></button>
+            <button onClick={() => document.getElementById('panels')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center gap-1 hover:text-foreground">Panels <ChevronDown className="w-3.5 h-3.5" /></button>
+            <button onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })} className="hover:text-foreground">How it works</button>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => go('login')} className="text-[15px] text-neutral-700 hover:text-neutral-900 hidden sm:block">Sign in</button>
+            <button onClick={() => go('login')} className="text-[15px] text-muted-foreground hover:text-foreground hidden sm:block">Sign in</button>
             <Button size="sm" onClick={() => go('login')} className="rounded-lg h-9">Stress test my pitch</Button>
           </div>
         </div>
       </nav>
 
       {/* HERO */}
-      <section className="relative overflow-hidden border-b border-neutral-100">
+      <section className="relative overflow-hidden border-b border-border">
         <FlowLines className="absolute right-0 top-0 w-[70%] h-full opacity-90 pointer-events-none" />
         <div className="container relative py-20 md:py-28 grid lg:grid-cols-2 gap-16 items-center">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white pl-1 pr-3 py-1 text-[13px] mb-7 shadow-sm">
-              <span className="rounded-full bg-neutral-900 text-white px-2 py-0.5 text-[11px] font-medium">New</span>
-              <span className="text-neutral-600">AI Investment Committee</span>
-              <ChevronRight className="w-3.5 h-3.5 text-neutral-400" />
+            <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card pl-1 pr-3 py-1 text-[13px] mb-7">
+              <span className="rounded-full bg-brand text-black px-2 py-0.5 text-[11px] font-medium">New</span>
+              <span className="text-muted-foreground">AI Investment Committee</span>
+              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
             </div>
-            <h1 className="text-5xl md:text-[64px] font-semibold tracking-[-0.02em] leading-[1.02] text-neutral-900">
+            <h1 className="text-5xl md:text-[64px] font-semibold tracking-[-0.02em] leading-[1.02] text-foreground">
               The AI investment committee<br />founders build on
             </h1>
-            <p className="mt-6 text-xl text-neutral-500 max-w-xl leading-relaxed">
+            <p className="mt-6 text-xl text-muted-foreground max-w-xl leading-relaxed">
               Pitch live. Get challenged. Find exactly where your startup breaks — then fix it and pitch again.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button size="lg" onClick={() => go('login')} className="rounded-lg h-12 px-6 text-[15px]">
                 Get started <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
-              <Button size="lg" variant="outline" onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })} className="rounded-lg h-12 px-6 text-[15px] border-neutral-200 bg-white hover:bg-neutral-50">
+              <Button size="lg" variant="outline" onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })} className="rounded-lg h-12 px-6 text-[15px] border-border bg-transparent hover:bg-secondary">
                 See how it works
               </Button>
             </div>
-            <p className="mt-7 text-[13px] text-neutral-400">AI Simulation. Not affiliated with any real investor, firm or program.</p>
+            <p className="mt-7 text-[13px] text-muted-foreground/70">AI Simulation. Not affiliated with any real investor, firm or program.</p>
           </div>
-
-          {/* product preview */}
-          <div className="relative">
-            <PitchPreview />
-          </div>
+          <div className="relative"><PitchPreview /></div>
         </div>
       </section>
 
-      {/* LOGOS / positioning strip */}
-      <section className="border-b border-neutral-100">
+      <section className="border-b border-border">
         <div className="container py-8 text-center">
-          <p className="text-neutral-500 text-[15px]">The simulation layer between founders and the real capital market.</p>
+          <p className="text-muted-foreground text-[15px]">The simulation layer between founders and the real capital market.</p>
         </div>
       </section>
 
@@ -203,17 +195,17 @@ function LandingView({ go }) {
             { i: Sparkles, t: 'Rewrite', d: 'Fix the gaps and pitch again, stronger.' },
           ].map((s, idx) => (
             <div key={idx} className="surface rounded-2xl p-5">
-              <div className="w-9 h-9 rounded-lg bg-white border border-neutral-200 grid place-items-center mb-3"><s.i className="w-4.5 h-4.5 text-brand" /></div>
-              <div className="text-xs text-neutral-400">Step {idx + 1}</div>
-              <div className="font-semibold mt-0.5 text-neutral-900">{s.t}</div>
-              <div className="text-sm text-neutral-500 mt-1">{s.d}</div>
+              <div className="w-9 h-9 rounded-lg bg-secondary border border-border grid place-items-center mb-3"><s.i className="w-4 h-4 text-brand" /></div>
+              <div className="text-xs text-muted-foreground/70">Step {idx + 1}</div>
+              <div className="font-semibold mt-0.5 text-foreground">{s.t}</div>
+              <div className="text-sm text-muted-foreground mt-1">{s.d}</div>
             </div>
           ))}
         </div>
       </section>
 
       {/* PANELS */}
-      <section id="panels" className="bg-[#fbfcf9] border-y border-neutral-100">
+      <section id="panels" className="bg-white/[0.02] border-y border-border">
         <div className="container py-24">
           <SectionTitle eyebrow="The panel" title="Three rooms. Nine investors. Every one different." sub="Each persona is a full decision system — its own lens, thresholds and distrusts. Same pitch, different verdicts." />
           <div className="grid md:grid-cols-3 gap-5 mt-14">
@@ -225,10 +217,10 @@ function LandingView({ go }) {
               <div key={i} className="relative surface rounded-2xl p-6 overflow-hidden">
                 <FlowLines className="absolute -right-10 -top-10 w-48 h-40 opacity-70" count={10} />
                 <div className="relative">
-                  <Badge variant="outline" className="mb-3 bg-white border-neutral-200 text-neutral-600">{p.diff}</Badge>
-                  <div className="text-xs text-neutral-400">{p.t}</div>
-                  <div className="text-xl font-semibold mt-1 text-neutral-900">{p.n}</div>
-                  <div className="text-sm text-neutral-500 mt-2">{p.d}</div>
+                  <Badge variant="outline" className="mb-3 bg-secondary border-border text-muted-foreground">{p.diff}</Badge>
+                  <div className="text-xs text-muted-foreground/70">{p.t}</div>
+                  <div className="text-xl font-semibold mt-1 text-foreground">{p.n}</div>
+                  <div className="text-sm text-muted-foreground mt-2">{p.d}</div>
                 </div>
               </div>
             ))}
@@ -238,11 +230,11 @@ function LandingView({ go }) {
 
       {/* CTA */}
       <section className="container py-24">
-        <div className="relative rounded-3xl border border-neutral-200 bg-[#f5f6f1] p-14 text-center overflow-hidden">
+        <div className="relative rounded-3xl border border-border surface p-14 text-center overflow-hidden">
           <FlowLines className="absolute inset-0 w-full h-full opacity-60" count={20} />
           <div className="relative">
-            <h2 className="text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900">Find where your startup breaks.</h2>
-            <p className="text-neutral-500 mt-4 text-lg">Before a real investor does.</p>
+            <h2 className="text-4xl md:text-5xl font-semibold tracking-tight text-foreground">Find where your startup breaks.</h2>
+            <p className="text-muted-foreground mt-4 text-lg">Before a real investor does.</p>
             <Button size="lg" onClick={() => go('login')} className="mt-8 rounded-lg h-12 px-7 text-[15px]">
               Stress test my pitch <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
@@ -250,10 +242,10 @@ function LandingView({ go }) {
         </div>
       </section>
 
-      <footer className="border-t border-neutral-100">
+      <footer className="border-t border-border">
         <div className="container py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
           <Logo />
-          <p className="text-[13px] text-neutral-400">AI Simulation. Not affiliated with any real investor, firm or program.</p>
+          <p className="text-[13px] text-muted-foreground/70">AI Simulation. Not affiliated with any real investor, firm or program.</p>
         </div>
       </footer>
     </div>
@@ -270,24 +262,24 @@ function PitchPreview() {
   const [i, setI] = useState(0)
   useEffect(() => { const t = setInterval(() => setI((p) => (p + 1) % steps.length), 2200); return () => clearInterval(t) }, [])
   return (
-    <div className="relative rounded-2xl border border-neutral-200 bg-white shadow-[0_20px_60px_-20px_rgba(0,0,0,0.15)] p-6">
-      <div className="flex items-center gap-2 pb-4 border-b border-neutral-100">
-        <div className="w-2.5 h-2.5 rounded-full bg-neutral-200" />
-        <div className="w-2.5 h-2.5 rounded-full bg-neutral-200" />
-        <div className="w-2.5 h-2.5 rounded-full bg-neutral-200" />
-        <span className="ml-2 text-xs text-neutral-400">live pitch simulation</span>
+    <div className="relative rounded-2xl border border-border bg-card shadow-2xl p-6">
+      <div className="flex items-center gap-2 pb-4 border-b border-border">
+        <div className="w-2.5 h-2.5 rounded-full bg-secondary" />
+        <div className="w-2.5 h-2.5 rounded-full bg-secondary" />
+        <div className="w-2.5 h-2.5 rounded-full bg-secondary" />
+        <span className="ml-2 text-xs text-muted-foreground">live pitch simulation</span>
       </div>
       <div className="space-y-2.5 min-h-[210px] pt-4">
         {steps.map((s, idx) => (
           <AnimatePresence key={idx}>
             {idx <= i && (
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`flex items-start gap-3 p-3 rounded-xl border ${s.tone === 'danger' ? 'border-red-200 bg-red-50' : s.tone === 'drop' ? 'border-red-100 bg-white' : s.tone === 'warn' ? 'border-amber-200 bg-amber-50' : 'border-neutral-100 bg-[#f6f7f2]'}`}>
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`flex items-start gap-3 p-3 rounded-xl border ${s.tone === 'danger' ? 'border-red-500/40 bg-red-500/10' : s.tone === 'drop' ? 'border-red-500/20 bg-secondary' : s.tone === 'warn' ? 'border-amber-500/40 bg-amber-500/10' : 'border-border bg-secondary'}`}>
                 <div className="mt-0.5">
-                  {s.tone === 'danger' ? <ShieldAlert className="w-4 h-4 text-red-500" /> : s.tone === 'drop' ? <TrendingDown className="w-4 h-4 text-red-500" /> : s.tone === 'warn' ? <Scale className="w-4 h-4 text-amber-500" /> : <Play className="w-4 h-4 text-brand" />}
+                  {s.tone === 'danger' ? <ShieldAlert className="w-4 h-4 text-red-400" /> : s.tone === 'drop' ? <TrendingDown className="w-4 h-4 text-red-400" /> : s.tone === 'warn' ? <Scale className="w-4 h-4 text-amber-400" /> : <Play className="w-4 h-4 text-brand" />}
                 </div>
                 <div>
-                  <div className="text-xs font-medium text-neutral-500">{s.label}</div>
-                  <div className="text-sm mt-0.5 text-neutral-800">{s.text}</div>
+                  <div className="text-xs font-medium text-muted-foreground">{s.label}</div>
+                  <div className="text-sm mt-0.5 text-foreground">{s.text}</div>
                 </div>
               </motion.div>
             )}
@@ -311,27 +303,19 @@ function LoginView({ onLogin, go }) {
   }
 
   return (
-    <div className="min-h-screen grid place-items-center bg-white relative overflow-hidden px-4">
+    <div className="min-h-screen grid place-items-center bg-background relative overflow-hidden px-4">
       <FlowLines className="absolute inset-0 w-full h-full opacity-40" count={22} />
       <div className="absolute top-6 left-6"><button onClick={() => go('landing')}><Logo /></button></div>
-      <div className="relative w-full max-w-md rounded-2xl border border-neutral-200 bg-white shadow-xl p-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-neutral-900">Enter EchoClash</h1>
-        <p className="text-sm text-neutral-500 mt-1">Sign in to stress test your pitch.</p>
+      <div className="relative w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl p-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Enter EchoClash</h1>
+        <p className="text-sm text-muted-foreground mt-1">Sign in to stress test your pitch.</p>
         <form onSubmit={submit} className="mt-6 space-y-4">
-          <div>
-            <Label className="text-neutral-700">Email</Label>
-            <Input value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1.5" />
-          </div>
-          <div>
-            <Label className="text-neutral-700">Password</Label>
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1.5" />
-          </div>
-          <Button type="submit" disabled={loading} className="w-full h-11 rounded-lg">
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sign in'}
-          </Button>
+          <div><Label className="text-foreground">Email</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1.5 bg-secondary border-border" /></div>
+          <div><Label className="text-foreground">Password</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1.5 bg-secondary border-border" /></div>
+          <Button type="submit" disabled={loading} className="w-full h-11 rounded-lg">{loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sign in'}</Button>
         </form>
-        <div className="mt-4 text-xs text-neutral-500 bg-[#f5f6f1] border border-neutral-200 rounded-lg p-3">
-          Demo access is pre-filled — just click <span className="text-neutral-900 font-medium">Sign in</span>.
+        <div className="mt-4 text-xs text-muted-foreground bg-secondary border border-border rounded-lg p-3">
+          Demo access is pre-filled — just click <span className="text-foreground font-medium">Sign in</span>.
         </div>
       </div>
     </div>
@@ -341,13 +325,13 @@ function LoginView({ onLogin, go }) {
 // ================================================================== SHELL
 function Shell({ children, go, logout }) {
   return (
-    <div className="min-h-screen bg-white">
-      <nav className="sticky top-0 z-40 bg-white/85 backdrop-blur-md border-b border-neutral-100">
+    <div className="min-h-screen bg-background">
+      <nav className="sticky top-0 z-40 bg-background/85 backdrop-blur-md border-b border-border">
         <div className="container flex items-center justify-between h-16">
           <button onClick={() => go('dashboard')}><Logo /></button>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" onClick={() => go('dashboard')} className="text-neutral-600">Dashboard</Button>
-            <Button variant="ghost" size="icon" onClick={logout} className="text-neutral-500"><LogOut className="w-4 h-4" /></Button>
+            <Button variant="ghost" size="sm" onClick={() => go('dashboard')} className="text-muted-foreground">Dashboard</Button>
+            <Button variant="ghost" size="icon" onClick={logout} className="text-muted-foreground"><LogOut className="w-4 h-4" /></Button>
           </div>
         </div>
       </nav>
@@ -374,8 +358,8 @@ function DashboardView({ user, go, logout }) {
     <Shell go={go} logout={logout}>
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">Founder Studio</h1>
-          <p className="text-neutral-500 mt-1">Your startups and their pitch trajectory.</p>
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Founder Studio</h1>
+          <p className="text-muted-foreground mt-1">Your startups and their pitch trajectory.</p>
         </div>
         <Button onClick={() => go('startup-new')} className="rounded-lg"><Plus className="w-4 h-4 mr-1" /> New startup</Button>
       </div>
@@ -387,8 +371,8 @@ function DashboardView({ user, go, logout }) {
           <FlowLines className="absolute inset-0 w-full h-full opacity-50" count={18} />
           <div className="relative">
             <Building2 className="w-10 h-10 text-brand mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-neutral-900">Create your first startup to begin</h3>
-            <p className="text-neutral-500 mt-2">Set up your startup, pick a panel, and pitch live.</p>
+            <h3 className="text-xl font-semibold text-foreground">Create your first startup to begin</h3>
+            <p className="text-muted-foreground mt-2">Set up your startup, pick a panel, and pitch live.</p>
             <Button onClick={() => go('startup-new')} className="mt-6 rounded-lg">Get started <ArrowRight className="w-4 h-4 ml-1" /></Button>
           </div>
         </div>
@@ -400,27 +384,27 @@ function DashboardView({ user, go, logout }) {
           const withVerdict = sess.filter((x) => x.status === 'ended')
           const latest = withVerdict[0]
           return (
-            <div key={s.id} className="rounded-2xl border border-neutral-200 bg-white p-6 hover:shadow-md transition-shadow">
+            <div key={s.id} className="rounded-2xl border border-border bg-card p-6 hover:border-white/20 transition-colors">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="text-xs text-neutral-400">{s.industry || 'Startup'} · {s.stage || 'Stage'}</div>
-                  <h3 className="text-xl font-semibold mt-0.5 text-neutral-900">{s.name}</h3>
-                  <p className="text-sm text-neutral-500 mt-1 line-clamp-2">{s.one_liner || s.problem}</p>
+                  <div className="text-xs text-muted-foreground/70">{s.industry || 'Startup'} · {s.stage || 'Stage'}</div>
+                  <h3 className="text-xl font-semibold mt-0.5 text-foreground">{s.name}</h3>
+                  <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{s.one_liner || s.problem}</p>
                 </div>
                 {latest?.verdict && <Badge variant="outline" className={VERDICT_COLOR[latest.verdict.verdict] || ''}>{latest.verdict.verdict}</Badge>}
               </div>
               <div className="flex items-center gap-8 mt-4">
-                <div><div className="text-2xl font-semibold text-neutral-900">{latest?.verdict?.final_score ?? '—'}</div><div className="text-xs text-neutral-400">Readiness</div></div>
-                <div><div className="text-2xl font-semibold text-neutral-900">{sess.length}</div><div className="text-xs text-neutral-400">Sessions</div></div>
+                <div><div className="text-2xl font-semibold text-foreground">{latest?.verdict?.final_score ?? '—'}</div><div className="text-xs text-muted-foreground/70">Readiness</div></div>
+                <div><div className="text-2xl font-semibold text-foreground">{sess.length}</div><div className="text-xs text-muted-foreground/70">Sessions</div></div>
               </div>
               <div className="flex gap-2 mt-5">
                 <Button size="sm" onClick={() => go('panels', { startup: s })} className="rounded-lg">{sess.length ? 'Re-pitch' : 'Pitch now'} <ArrowRight className="w-4 h-4 ml-1" /></Button>
-                {latest && <Button size="sm" variant="outline" onClick={() => go('debrief', { sessionId: latest.id })} className="rounded-lg border-neutral-200">Latest debrief</Button>}
+                {latest && <Button size="sm" variant="outline" onClick={() => go('debrief', { sessionId: latest.id })} className="rounded-lg border-border">Latest debrief</Button>}
               </div>
               {sess.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-neutral-100 space-y-1.5">
+                <div className="mt-4 pt-4 border-t border-border space-y-1.5">
                   {sess.slice(0, 3).map((x) => (
-                    <div key={x.id} className="flex items-center justify-between text-xs text-neutral-500">
+                    <div key={x.id} className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Round {x.round_number} · {x.turns} turns</span>
                       <span>{x.verdict ? x.verdict.verdict : (x.status === 'active' ? 'In progress' : '—')}</span>
                     </div>
@@ -477,24 +461,24 @@ function StartupNewView({ user, go }) {
     <Shell go={go} logout={() => go('landing')}>
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center gap-2 mb-6">
-          {STARTUP_SECTIONS.map((s, i) => <div key={i} className={`h-1.5 flex-1 rounded-full ${i <= step ? 'bg-brand' : 'bg-neutral-200'}`} />)}
+          {STARTUP_SECTIONS.map((s, i) => <div key={i} className={`h-1.5 flex-1 rounded-full ${i <= step ? 'bg-brand' : 'bg-secondary'}`} />)}
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-neutral-900">{section.title}</h1>
-        <p className="text-sm text-neutral-500 mt-1">Step {step + 1} of {STARTUP_SECTIONS.length}. Required fields marked; others are optional.</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{section.title}</h1>
+        <p className="text-sm text-muted-foreground mt-1">Step {step + 1} of {STARTUP_SECTIONS.length}. Required fields marked; others are optional.</p>
 
-        <div className="rounded-2xl border border-neutral-200 bg-white p-6 mt-6 space-y-4">
+        <div className="rounded-2xl border border-border bg-card p-6 mt-6 space-y-4">
           {section.fields.map((f) => (
             <div key={f.k}>
-              <Label className="flex items-center gap-2 text-neutral-700">{f.l} {f.req ? <span className="text-red-500">*</span> : <span className="text-[10px] text-neutral-400 border border-neutral-200 rounded px-1">optional</span>}</Label>
+              <Label className="flex items-center gap-2 text-foreground">{f.l} {f.req ? <span className="text-red-400">*</span> : <span className="text-[10px] text-muted-foreground border border-border rounded px-1">optional</span>}</Label>
               {f.area
-                ? <Textarea value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)} className="mt-1.5" rows={3} />
-                : <Input value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)} className="mt-1.5" />}
+                ? <Textarea value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)} className="mt-1.5 bg-secondary border-border" rows={3} />
+                : <Input value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)} className="mt-1.5 bg-secondary border-border" />}
             </div>
           ))}
         </div>
 
         <div className="flex justify-between mt-6">
-          <Button variant="outline" className="rounded-lg border-neutral-200" onClick={() => step === 0 ? go('dashboard') : setStep(step - 1)}>Back</Button>
+          <Button variant="outline" className="rounded-lg border-border bg-transparent" onClick={() => step === 0 ? go('dashboard') : setStep(step - 1)}>Back</Button>
           {step < STARTUP_SECTIONS.length - 1
             ? <Button disabled={!canNext} onClick={() => setStep(step + 1)} className="rounded-lg">Continue <ChevronRight className="w-4 h-4 ml-1" /></Button>
             : <Button disabled={!canNext || saving} onClick={save} className="rounded-lg">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Choose panel <ArrowRight className="w-4 h-4 ml-1" /></>}</Button>}
@@ -520,29 +504,29 @@ function PanelsView({ user, go, startup }) {
   return (
     <Shell go={go} logout={() => go('landing')}>
       <div className="text-center mb-10 max-w-2xl mx-auto">
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900">Who do you want to pitch to?</h1>
-        <p className="text-neutral-500 mt-2">Pitching <span className="text-neutral-900 font-medium">{startup?.name}</span> · each room evaluates you differently.</p>
+        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground">Who do you want to pitch to?</h1>
+        <p className="text-muted-foreground mt-2">Pitching <span className="text-foreground font-medium">{startup?.name}</span> · each room evaluates you differently.</p>
       </div>
 
       {!panels && <div className="grid place-items-center py-20"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>}
 
       <div className="grid lg:grid-cols-3 gap-5">
         {(panels || []).map((p) => (
-          <div key={p.id} className="rounded-2xl border border-neutral-200 bg-white p-6 flex flex-col hover:shadow-md transition-shadow">
+          <div key={p.id} className="rounded-2xl border border-border bg-card p-6 flex flex-col hover:border-white/20 transition-colors">
             <div className="flex items-center justify-between">
-              <Badge variant="outline" className="bg-[#f5f6f1] border-neutral-200 text-neutral-700">{p.difficulty}</Badge>
-              <span className="text-xs text-neutral-400">{p.tagline}</span>
+              <Badge variant="outline" className="bg-secondary border-border text-foreground">{p.difficulty}</Badge>
+              <span className="text-xs text-muted-foreground/70">{p.tagline}</span>
             </div>
-            <h3 className="text-xl font-semibold mt-3 text-neutral-900">{p.name}</h3>
-            <p className="text-sm text-neutral-500 mt-2">{p.description}</p>
+            <h3 className="text-xl font-semibold mt-3 text-foreground">{p.name}</h3>
+            <p className="text-sm text-muted-foreground mt-2">{p.description}</p>
             <div className="flex flex-wrap gap-1.5 mt-3">
-              {p.focus.map((f) => <span key={f} className="text-[11px] bg-[#f5f6f1] border border-neutral-200 rounded px-2 py-0.5 text-neutral-600">{f}</span>)}
+              {p.focus.map((f) => <span key={f} className="text-[11px] bg-secondary border border-border rounded px-2 py-0.5 text-muted-foreground">{f}</span>)}
             </div>
             <div className="space-y-2 mt-5">
               {p.personas.map((pe) => (
-                <div key={pe.id} className="flex items-center gap-3 p-2 rounded-xl bg-[#f7f8f4] border border-neutral-100">
-                  <img src={pe.avatar_url} alt={pe.name} className="w-9 h-9 rounded-full object-cover border border-neutral-200" />
-                  <div className="min-w-0"><div className="text-sm font-medium truncate text-neutral-900">{pe.name}</div><div className="text-xs text-neutral-500 truncate">{pe.role}</div></div>
+                <div key={pe.id} className="flex items-center gap-3 p-2 rounded-xl bg-secondary border border-border">
+                  <img src={pe.avatar_url} alt={pe.name} className="w-9 h-9 rounded-full object-cover border border-border" />
+                  <div className="min-w-0"><div className="text-sm font-medium truncate text-foreground">{pe.name}</div><div className="text-xs text-muted-foreground truncate">{pe.role}</div></div>
                 </div>
               ))}
             </div>
@@ -552,7 +536,7 @@ function PanelsView({ user, go, startup }) {
           </div>
         ))}
       </div>
-      <p className="text-center text-xs text-neutral-400 mt-8">AI Simulation. Not affiliated with any real investor, firm or program.</p>
+      <p className="text-center text-xs text-muted-foreground/60 mt-8">AI Simulation. Not affiliated with any real investor, firm or program.</p>
     </Shell>
   )
 }
@@ -633,20 +617,20 @@ function PitchRoomView({ user, go, sessionId }) {
     catch (err) { toast.error('Deliberation failed. Try again.'); setEnding(false) }
   }
 
-  if (!session) return <div className="min-h-screen grid place-items-center bg-white"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
+  if (!session) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      <div className="bg-white/85 backdrop-blur-md border-b border-neutral-100 sticky top-0 z-40">
+    <div className="min-h-screen bg-background flex flex-col">
+      <div className="bg-background/85 backdrop-blur-md border-b border-border sticky top-0 z-40">
         <div className="container flex items-center justify-between h-14">
           <div className="flex items-center gap-4">
             <Logo className="text-[15px]" />
-            <Badge variant="outline" className="hidden sm:flex border-neutral-200 text-neutral-500 gap-1"><Clock className="w-3 h-3" /> {fmtTime(elapsed)}</Badge>
-            <span className="text-sm text-neutral-500 hidden md:block">{session.panel_name}</span>
+            <Badge variant="outline" className="hidden sm:flex border-border text-muted-foreground gap-1"><Clock className="w-3 h-3" /> {fmtTime(elapsed)}</Badge>
+            <span className="text-sm text-muted-foreground hidden md:block">{session.panel_name}</span>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="border-emerald-200 text-emerald-700 bg-emerald-50 text-[10px]">AI SIMULATION</Badge>
-            <Button size="icon" variant="ghost" onClick={() => setTtsOn((v) => !v)} title="Toggle voice">{ttsOn ? <Volume2 className="w-4 h-4 text-brand" /> : <VolumeX className="w-4 h-4 text-neutral-400" />}</Button>
+            <Badge variant="outline" className="border-emerald-500/30 text-emerald-300 bg-emerald-500/10 text-[10px]">AI SIMULATION</Badge>
+            <Button size="icon" variant="ghost" onClick={() => setTtsOn((v) => !v)} title="Toggle voice">{ttsOn ? <Volume2 className="w-4 h-4 text-brand" /> : <VolumeX className="w-4 h-4 text-muted-foreground" />}</Button>
             <Button size="sm" variant="destructive" onClick={endPitch} disabled={ending}>{ending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'End pitch'}</Button>
           </div>
         </div>
@@ -659,20 +643,20 @@ function PitchRoomView({ user, go, sessionId }) {
             const conf = avgConfidence(beliefs[p.id])
             const isSpeaking = speaker === p.id
             return (
-              <div key={p.id} className={`rounded-2xl p-3 bg-white border transition-all ${isSpeaking ? 'border-emerald-300 shadow-[0_0_0_3px_rgba(34,197,94,0.12)]' : 'border-neutral-200'}`}>
+              <div key={p.id} className={`rounded-2xl p-3 bg-card border transition-all ${isSpeaking ? 'border-emerald-400/50 shadow-[0_0_0_3px_rgba(34,197,94,0.15)]' : 'border-border'}`}>
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <img src={p.avatar_url} alt={p.name} className="w-11 h-11 rounded-full object-cover border border-neutral-200" />
-                    <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${isSpeaking ? 'bg-brand animate-pulse' : thinking ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+                    <img src={p.avatar_url} alt={p.name} className="w-11 h-11 rounded-full object-cover border border-border" />
+                    <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-card ${isSpeaking ? 'bg-brand animate-pulse' : thinking ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold truncate text-neutral-900">{p.name}</div>
-                    <div className="text-[11px] text-neutral-500 truncate">{p.role}</div>
+                    <div className="text-sm font-semibold truncate text-foreground">{p.name}</div>
+                    <div className="text-[11px] text-muted-foreground truncate">{p.role}</div>
                   </div>
                 </div>
                 <div className="mt-2.5 flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider text-neutral-400">{isSpeaking ? 'speaking' : thinking ? 'thinking' : 'listening'}</span>
-                  <motion.span key={conf} initial={{ scale: 1.3, color: '#16a34a' }} animate={{ scale: 1, color: '#111' }} className="text-sm font-bold tabular-nums">{conf}</motion.span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{isSpeaking ? 'speaking' : thinking ? 'thinking' : 'listening'}</span>
+                  <motion.span key={conf} initial={{ scale: 1.3, color: '#34d399' }} animate={{ scale: 1, color: '#fafafa' }} className="text-sm font-bold tabular-nums">{conf}</motion.span>
                 </div>
                 <Progress value={conf} className="h-1.5 mt-1" />
               </div>
@@ -687,13 +671,13 @@ function PitchRoomView({ user, go, sessionId }) {
           {transcript.length === 0 && (
             <div className="text-center py-16">
               <Sparkles className="w-8 h-8 text-brand mx-auto mb-3" />
-              <h3 className="text-lg font-semibold text-neutral-900">The panel is ready.</h3>
-              <p className="text-neutral-500 mt-1 text-sm">Open with your pitch. Be specific — they will check your numbers.</p>
+              <h3 className="text-lg font-semibold text-foreground">The panel is ready.</h3>
+              <p className="text-muted-foreground mt-1 text-sm">Open with your pitch. Be specific — they will check your numbers.</p>
             </div>
           )}
           {transcript.map((m) => <MessageBubble key={m.id} m={m} personas={personas} />)}
           {thinking && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3 text-neutral-500">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3 text-muted-foreground">
               <Loader2 className="w-4 h-4 animate-spin text-brand" /><span className="text-sm">{STATUS_MSGS[statusIdx]}</span>
             </motion.div>
           )}
@@ -701,21 +685,21 @@ function PitchRoomView({ user, go, sessionId }) {
       </div>
 
       {/* input */}
-      <div className="bg-white/90 backdrop-blur-md border-t border-neutral-100 sticky bottom-0">
+      <div className="bg-background/90 backdrop-blur-md border-t border-border sticky bottom-0">
         <div className="container py-3 max-w-4xl mx-auto">
           <div className="flex items-end gap-2">
             {micSupported && (
-              <button onClick={toggleMic} className={`shrink-0 w-11 h-11 rounded-full grid place-items-center transition-all ${listening ? 'bg-brand mic-pulse' : 'bg-[#f0f1ec] hover:bg-neutral-200'}`}>
-                <Mic className={`w-5 h-5 ${listening ? 'text-white' : 'text-neutral-500'}`} />
+              <button onClick={toggleMic} className={`shrink-0 w-11 h-11 rounded-full grid place-items-center transition-all ${listening ? 'bg-brand mic-pulse' : 'bg-secondary hover:bg-accent'}`}>
+                <Mic className={`w-5 h-5 ${listening ? 'text-black' : 'text-muted-foreground'}`} />
               </button>
             )}
             <Textarea value={input} onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
               placeholder={listening ? 'Listening...' : 'Make your pitch. Answer their questions...'} rows={1}
-              className="resize-none min-h-[44px] max-h-32 bg-[#f7f8f4]" />
+              className="resize-none min-h-[44px] max-h-32 bg-secondary border-border" />
             <Button onClick={send} disabled={thinking || !input.trim()} className="shrink-0 h-11 rounded-lg"><Send className="w-4 h-4" /></Button>
           </div>
-          {!micSupported && <p className="text-[11px] text-neutral-400 mt-1.5">Voice input isn’t supported in this browser — type your pitch instead.</p>}
+          {!micSupported && <p className="text-[11px] text-muted-foreground/70 mt-1.5">Voice input isn’t supported in this browser — type your pitch instead.</p>}
         </div>
       </div>
     </div>
@@ -726,8 +710,8 @@ function MessageBubble({ m, personas }) {
   if (m.role === 'founder') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-neutral-900 text-white px-4 py-2.5">
-          <div className="text-[10px] text-white/60 mb-0.5">You</div>
+        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-primary text-primary-foreground px-4 py-2.5">
+          <div className="text-[10px] opacity-60 mb-0.5">You</div>
           <div className="text-sm whitespace-pre-wrap">{m.content}</div>
         </div>
       </div>
@@ -736,24 +720,24 @@ function MessageBubble({ m, personas }) {
   const persona = personas.find((p) => p.id === m.persona_id)
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex gap-3">
-      <img src={m.avatar_url || persona?.avatar_url} alt={m.personaName} className="w-9 h-9 rounded-full object-cover border border-neutral-200 shrink-0 mt-1" />
+      <img src={m.avatar_url || persona?.avatar_url} alt={m.personaName} className="w-9 h-9 rounded-full object-cover border border-border shrink-0 mt-1" />
       <div className="max-w-[85%] space-y-2">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-neutral-900">{m.personaName}</span>
-          <span className="text-[11px] text-neutral-500">{m.personaRole}</span>
+          <span className="text-sm font-semibold text-foreground">{m.personaName}</span>
+          <span className="text-[11px] text-muted-foreground">{m.personaRole}</span>
         </div>
-        <div className="rounded-2xl rounded-tl-md bg-[#f5f6f1] border border-neutral-200 px-4 py-3">
-          <div className="text-sm whitespace-pre-wrap text-neutral-800">{m.content}</div>
+        <div className="rounded-2xl rounded-tl-md bg-card border border-border px-4 py-3">
+          <div className="text-sm whitespace-pre-wrap text-foreground/90">{m.content}</div>
           {m.question?.text && (
-            <div className="mt-2.5 pt-2.5 border-t border-neutral-200 text-sm text-neutral-900 flex gap-2">
+            <div className="mt-2.5 pt-2.5 border-t border-border text-sm text-foreground flex gap-2">
               <Target className="w-4 h-4 shrink-0 mt-0.5 text-brand" /> {m.question.text}
             </div>
           )}
         </div>
         {(m.contradictions || []).map((c, i) => (
-          <div key={i} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 flex gap-2">
-            <ShieldAlert className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-            <div><div className="text-xs font-semibold text-red-700">Contradiction · {c.severity}</div><div className="text-xs text-red-600/80 mt-0.5">{c.explanation}</div></div>
+          <div key={i} className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 flex gap-2">
+            <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <div><div className="text-xs font-semibold text-red-300">Contradiction · {c.severity}</div><div className="text-xs text-red-200/70 mt-0.5">{c.explanation}</div></div>
           </div>
         ))}
         {(m.beliefChanges || []).length > 0 && (
@@ -761,7 +745,7 @@ function MessageBubble({ m, personas }) {
             {m.beliefChanges.map((b, i) => {
               const down = b.new < b.previous
               return (
-                <span key={i} className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border ${down ? 'border-red-200 text-red-700 bg-red-50' : 'border-emerald-200 text-emerald-700 bg-emerald-50'}`}>
+                <span key={i} className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border ${down ? 'border-red-500/30 text-red-300 bg-red-500/10' : 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10'}`}>
                   {down ? <TrendingDown className="w-3 h-3" /> : <TrendingUp className="w-3 h-3" />}
                   {DIM_LABELS[b.dimension] || b.dimension} {b.previous}→{b.new}
                 </span>
@@ -787,12 +771,12 @@ function DebriefView({ user, go, sessionId }) {
     load(); toast.success('Gap marked resolved.')
   }
 
-  if (!session) return <div className="min-h-screen grid place-items-center bg-white"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
+  if (!session) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
   const v = session.verdict
   if (!v) return (
     <Shell go={go} logout={() => go('landing')}>
-      <div className="rounded-2xl border border-neutral-200 bg-white p-12 text-center">
-        <p className="text-neutral-500">This session hasn’t been deliberated yet.</p>
+      <div className="rounded-2xl border border-border bg-card p-12 text-center">
+        <p className="text-muted-foreground">This session hasn’t been deliberated yet.</p>
         <Button className="mt-4 rounded-lg" onClick={() => go('pitch', { sessionId })}>Resume pitch</Button>
       </div>
     </Shell>
@@ -806,71 +790,70 @@ function DebriefView({ user, go, sessionId }) {
     <Shell go={go} logout={() => go('landing')}>
       <div className="text-center mb-6">
         <div className="text-xs uppercase tracking-widest text-brand font-medium">Pitch complete</div>
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight mt-1 text-neutral-900">Here’s where your startup breaks.</h1>
+        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight mt-1 text-foreground">Here’s where your startup breaks.</h1>
       </div>
 
-      {/* score banner */}
-      <div className="relative rounded-2xl border border-neutral-200 bg-[#f5f6f1] p-6 mb-6 overflow-hidden">
+      <div className="relative rounded-2xl border border-border surface p-6 mb-6 overflow-hidden">
         <FlowLines className="absolute right-0 top-0 w-1/2 h-full opacity-60" count={14} />
         <div className="relative flex flex-wrap items-center justify-between gap-6">
           <div className="flex items-center gap-6">
             <div>
               <div className="flex items-end gap-2">
-                <motion.span initial={{ scale: 1.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-5xl font-semibold text-neutral-900">{v.final_score}</motion.span>
-                <span className="text-neutral-400 mb-1">/ 100</span>
+                <motion.span initial={{ scale: 1.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-5xl font-semibold text-foreground">{v.final_score}</motion.span>
+                <span className="text-muted-foreground/70 mb-1">/ 100</span>
               </div>
-              <div className="text-xs text-neutral-500 mt-1">Pitch readiness{delta != null && <span className={delta >= 0 ? 'text-emerald-600 ml-2' : 'text-red-600 ml-2'}>{delta >= 0 ? '↑' : '↓'} {Math.abs(delta)} vs last</span>}</div>
+              <div className="text-xs text-muted-foreground mt-1">Pitch readiness{delta != null && <span className={delta >= 0 ? 'text-emerald-400 ml-2' : 'text-red-400 ml-2'}>{delta >= 0 ? '↑' : '↓'} {Math.abs(delta)} vs last</span>}</div>
             </div>
-            <div className="h-12 w-px bg-neutral-300" />
-            <div><div className="text-xs text-neutral-500">Confidence</div><div className="text-2xl font-semibold text-neutral-900">{v.confidence}%</div></div>
+            <div className="h-12 w-px bg-border" />
+            <div><div className="text-xs text-muted-foreground">Confidence</div><div className="text-2xl font-semibold text-foreground">{v.confidence}%</div></div>
           </div>
           <Badge variant="outline" className={`text-base px-4 py-1.5 ${VERDICT_COLOR[v.verdict] || ''}`}>{v.verdict}</Badge>
         </div>
-        <div className="relative grid sm:grid-cols-2 gap-4 mt-5 pt-5 border-t border-neutral-200">
-          <div className="flex items-center gap-2 text-sm text-neutral-700"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> Strongest: <span className="font-medium">{DIM_LABELS[v.strongest_dimension] || v.strongest_dimension}</span></div>
-          <div className="flex items-center gap-2 text-sm text-neutral-700"><AlertTriangle className="w-4 h-4 text-red-500" /> Weakest: <span className="font-medium">{DIM_LABELS[v.weakest_dimension] || v.weakest_dimension}</span></div>
+        <div className="relative grid sm:grid-cols-2 gap-4 mt-5 pt-5 border-t border-border">
+          <div className="flex items-center gap-2 text-sm text-foreground/90"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Strongest: <span className="font-medium">{DIM_LABELS[v.strongest_dimension] || v.strongest_dimension}</span></div>
+          <div className="flex items-center gap-2 text-sm text-foreground/90"><AlertTriangle className="w-4 h-4 text-red-400" /> Weakest: <span className="font-medium">{DIM_LABELS[v.weakest_dimension] || v.weakest_dimension}</span></div>
         </div>
         <div className="relative flex gap-2 mt-5">
           <Button className="rounded-lg" onClick={() => go('panels', { startup: session.startup })}>Re-pitch <ArrowRight className="w-4 h-4 ml-1" /></Button>
-          <Button variant="outline" className="rounded-lg border-neutral-200 bg-white" onClick={() => go('dashboard')}>Back to Studio</Button>
+          <Button variant="outline" className="rounded-lg border-border bg-transparent" onClick={() => go('dashboard')}>Back to Studio</Button>
         </div>
       </div>
 
       <div className="flex gap-2 mb-4">
         {[['analysis', 'Gaps & Scorecard'], ['deliberation', 'Panel Deliberation'], ['transcript', 'Transcript']].map(([k, l]) => (
-          <Button key={k} size="sm" variant={tab === k ? 'default' : 'outline'} className={`rounded-lg ${tab === k ? '' : 'border-neutral-200'}`} onClick={() => setTab(k)}>{l}</Button>
+          <Button key={k} size="sm" variant={tab === k ? 'default' : 'outline'} className={`rounded-lg ${tab === k ? '' : 'border-border bg-transparent'}`} onClick={() => setTab(k)}>{l}</Button>
         ))}
       </div>
 
       {tab === 'analysis' && (
         <div className="grid lg:grid-cols-2 gap-6">
           <div className="space-y-3">
-            <h3 className="font-semibold flex items-center gap-2 text-neutral-900"><Target className="w-4 h-4 text-brand" /> Prioritized gaps</h3>
-            {gaps.length === 0 && <p className="text-sm text-neutral-500">No gaps recorded.</p>}
+            <h3 className="font-semibold flex items-center gap-2 text-foreground"><Target className="w-4 h-4 text-brand" /> Prioritized gaps</h3>
+            {gaps.length === 0 && <p className="text-sm text-muted-foreground">No gaps recorded.</p>}
             {['P0', 'P1', 'P2'].map((sev) => gaps.filter((g) => g.severity === sev).map((g) => (
-              <div key={g.id} className={`rounded-2xl border bg-white p-4 ${g.status === 'RESOLVED' ? 'border-emerald-200 opacity-70' : 'border-neutral-200'}`}>
+              <div key={g.id} className={`rounded-2xl border bg-card p-4 ${g.status === 'RESOLVED' ? 'border-emerald-500/30 opacity-70' : 'border-border'}`}>
                 <div className="flex items-center justify-between">
                   <Badge variant="outline" className={SEV_COLOR[g.severity]}>{g.severity} · {g.category}</Badge>
                   {g.status === 'RESOLVED'
-                    ? <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Resolved</span>
+                    ? <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Resolved</span>
                     : <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => resolveGap(g.id)}>Mark resolved</Button>}
                 </div>
-                <p className="text-sm mt-2 text-neutral-800">{g.why_it_matters}</p>
-                <div className="mt-2 text-xs text-neutral-500"><span className="text-brand font-medium">Action:</span> {g.recommended_action}</div>
-                {g.required_evidence && <div className="mt-1 text-xs text-neutral-500"><span className="text-amber-600 font-medium">Evidence needed:</span> {g.required_evidence}</div>}
+                <p className="text-sm mt-2 text-foreground/90">{g.why_it_matters}</p>
+                <div className="mt-2 text-xs text-muted-foreground"><span className="text-brand font-medium">Action:</span> {g.recommended_action}</div>
+                {g.required_evidence && <div className="mt-1 text-xs text-muted-foreground"><span className="text-amber-400 font-medium">Evidence needed:</span> {g.required_evidence}</div>}
               </div>
             )))}
           </div>
           <div>
-            <h3 className="font-semibold flex items-center gap-2 mb-3 text-neutral-900"><LineChart className="w-4 h-4 text-brand" /> Scorecard</h3>
-            <div className="rounded-2xl border border-neutral-200 bg-white p-4 space-y-3">
+            <h3 className="font-semibold flex items-center gap-2 mb-3 text-foreground"><LineChart className="w-4 h-4 text-brand" /> Scorecard</h3>
+            <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
               {DIM_ORDER.map((k) => {
                 const s = scByKey[k]; const score = s?.score ?? 0
                 return (
                   <div key={k}>
-                    <div className="flex items-center justify-between text-sm text-neutral-800"><span>{DIM_LABELS[k]}</span><span className="font-semibold tabular-nums">{score}/10</span></div>
+                    <div className="flex items-center justify-between text-sm text-foreground/90"><span>{DIM_LABELS[k]}</span><span className="font-semibold tabular-nums">{score}/10</span></div>
                     <Progress value={score * 10} className="h-1.5 mt-1" />
-                    {s?.reason && <p className="text-[11px] text-neutral-500 mt-1">{s.reason}</p>}
+                    {s?.reason && <p className="text-[11px] text-muted-foreground mt-1">{s.reason}</p>}
                   </div>
                 )
               })}
@@ -881,21 +864,21 @@ function DebriefView({ user, go, sessionId }) {
 
       {tab === 'deliberation' && (
         <div className="grid md:grid-cols-2 gap-6">
-          <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <h3 className="font-semibold flex items-center gap-2 text-neutral-900"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> Consensus</h3>
-            <ul className="mt-3 space-y-2 text-sm text-neutral-600 list-disc pl-4">{(v.consensus || []).map((c, i) => <li key={i}>{c}</li>)}</ul>
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <h3 className="font-semibold flex items-center gap-2 text-foreground"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Consensus</h3>
+            <ul className="mt-3 space-y-2 text-sm text-muted-foreground list-disc pl-4">{(v.consensus || []).map((c, i) => <li key={i}>{c}</li>)}</ul>
           </div>
-          <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <h3 className="font-semibold flex items-center gap-2 text-neutral-900"><Scale className="w-4 h-4 text-amber-500" /> Where the panel disagreed</h3>
-            <ul className="mt-3 space-y-2 text-sm">{(v.disagreements || []).map((d, i) => <li key={i} className="text-neutral-600"><span className="font-medium text-neutral-900">{d.topic}:</span> {d.positions}</li>)}</ul>
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <h3 className="font-semibold flex items-center gap-2 text-foreground"><Scale className="w-4 h-4 text-amber-400" /> Where the panel disagreed</h3>
+            <ul className="mt-3 space-y-2 text-sm">{(v.disagreements || []).map((d, i) => <li key={i} className="text-muted-foreground"><span className="font-medium text-foreground">{d.topic}:</span> {d.positions}</li>)}</ul>
           </div>
-          <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <h3 className="font-semibold flex items-center gap-2 text-neutral-900"><Sparkles className="w-4 h-4 text-brand" /> What would change their mind</h3>
-            <ul className="mt-3 space-y-2 text-sm text-neutral-600 list-disc pl-4">{(v.investment_conditions || []).map((c, i) => <li key={i}>{c}</li>)}</ul>
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <h3 className="font-semibold flex items-center gap-2 text-foreground"><Sparkles className="w-4 h-4 text-brand" /> What would change their mind</h3>
+            <ul className="mt-3 space-y-2 text-sm text-muted-foreground list-disc pl-4">{(v.investment_conditions || []).map((c, i) => <li key={i}>{c}</li>)}</ul>
           </div>
-          <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <h3 className="font-semibold flex items-center gap-2 text-neutral-900"><AlertTriangle className="w-4 h-4 text-red-500" /> Critical unresolved questions</h3>
-            <ul className="mt-3 space-y-2 text-sm text-neutral-600 list-disc pl-4">{(v.unresolved_questions || []).map((c, i) => <li key={i}>{c}</li>)}</ul>
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <h3 className="font-semibold flex items-center gap-2 text-foreground"><AlertTriangle className="w-4 h-4 text-red-400" /> Critical unresolved questions</h3>
+            <ul className="mt-3 space-y-2 text-sm text-muted-foreground list-disc pl-4">{(v.unresolved_questions || []).map((c, i) => <li key={i}>{c}</li>)}</ul>
           </div>
         </div>
       )}

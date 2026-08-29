@@ -134,7 +134,14 @@ function buildTurnUser(session, startup, founderMessage) {
     return `${m.personaName} (${m.personaRole}): ${m.content}${m.question?.text ? ' Q: ' + m.question.text : ''}`
   }).join('\n') || '  (pitch just started)'
 
-  return `STARTUP MEMORY:\n${startupMemory(startup)}\nPRIOR CLAIMS:\n${priorClaims}\n\nOPEN CONTRADICTIONS:\n${contradictions}\n\nCURRENT BELIEF SCORES (persona: dim=score):\n${beliefs}\n\nCONVERSATION SO FAR:\n${transcript}\n\nFOUNDER JUST SAID:\n"""${founderMessage}"""\n\nProcess this turn now. Return the JSON object.`
+  let memoryBlock = ''
+  if (session.memory && (session.memory.claims?.length || session.memory.gaps?.length)) {
+    const mClaims = (session.memory.claims || []).slice(0, 25).map((c) => `- ${c}`).join('\n') || '  (none)'
+    const mGaps = (session.memory.gaps || []).map((g) => `- [${g.severity} ${g.category}] ${g.why_it_matters} (${g.status})`).join('\n') || '  (none)'
+    memoryBlock = `\nMEMORY FROM PRIOR PITCH ROUNDS (this is round ${session.round_number}; the panel REMEMBERS these):\nPrior claims:\n${mClaims}\nPrior gaps (note which are now resolved vs still open):\n${mGaps}\nLast round score: ${session.memory.last_score ?? 'n/a'}\n`
+  }
+
+  return `STARTUP MEMORY:\n${startupMemory(startup)}${memoryBlock}\nPRIOR CLAIMS (this session):\n${priorClaims}\n\nOPEN CONTRADICTIONS:\n${contradictions}\n\nCURRENT BELIEF SCORES (persona: dim=score):\n${beliefs}\n\nCONVERSATION SO FAR:\n${transcript}\n\nFOUNDER JUST SAID:\n"""${founderMessage}"""\n\nProcess this turn now. Return the JSON object.`
 }
 
 function deliberationSystem(panel) {
@@ -367,11 +374,24 @@ async function handleRoute(request, { params }) {
       const startup = await db.collection('startups').findOne({ id: startup_id })
       if (!startup) return json({ error: 'startup not found' }, 404)
       const priorCount = await db.collection('sessions').countDocuments({ startup_id })
+      // build re-pitch memory from prior ended sessions
+      const priorSessions = await db.collection('sessions').find({ startup_id, status: 'ended' }).sort({ ended_at: 1 }).toArray()
+      let memory = null
+      if (priorSessions.length) {
+        const claimSet = new Set()
+        const gaps = []
+        for (const ps of priorSessions) {
+          for (const c of (ps.claims || [])) claimSet.add(`[${c.category}] ${c.text}${c.numeric_value != null ? ` (=${c.numeric_value}${c.unit || ''})` : ''}`)
+          for (const g of (ps.gaps || [])) gaps.push({ category: g.category, severity: g.severity, why_it_matters: g.why_it_matters, status: g.status })
+        }
+        const last = priorSessions[priorSessions.length - 1]
+        memory = { claims: Array.from(claimSet).slice(0, 40), gaps, last_score: last?.verdict?.final_score ?? null }
+      }
       const session = {
         id: uuidv4(), user_id: user_id || null, startup_id, panel_id,
         panel_name: panel.name, status: 'active', mode: 'live', round_number: priorCount + 1,
         transcript: [], claims: [], contradictions: [], beliefs: initialBeliefs(panel),
-        belief_history: [], verdict: null, gaps: [], scorecard: [],
+        belief_history: [], verdict: null, gaps: [], scorecard: [], memory,
         started_at: new Date(), ended_at: null,
       }
       await db.collection('sessions').insertOne(session)
@@ -555,6 +575,132 @@ async function handleRoute(request, { params }) {
         { $set: { 'gaps.$.status': status || 'RESOLVED' } }
       )
       return json({ ok: true })
+    }
+
+    // ---- AI REWRITE ----
+    if (route === '/rewrite' && method === 'POST') {
+      const body = await request.json()
+      const { session_id, gap_ids, length } = body || {}
+      if (!session_id) return json({ error: 'session_id required' }, 400)
+      const session = await db.collection('sessions').findOne({ id: session_id })
+      if (!session) return json({ error: 'session not found' }, 404)
+      const startup = await db.collection('startups').findOne({ id: session.startup_id })
+      const allGaps = session.gaps || []
+      let selected = allGaps.filter((g) => (gap_ids || []).includes(g.id))
+      if (!selected.length) selected = allGaps.filter((g) => g.severity === 'P0')
+      if (!selected.length) selected = allGaps
+
+      const messages = [
+        { role: 'system', content: rewriteSystem(length || '90s') },
+        { role: 'user', content: buildRewriteUser(session, startup, selected) },
+      ]
+      let result
+      try { result = await callLLMJson(messages, { maxTokens: 2600 }) }
+      catch (e) { return json({ error: 'ai_unavailable', detail: String(e.message || e) }, 502) }
+      if (!result || !result.sections) return json({ error: 'ai_bad_response' }, 502)
+
+      const version = {
+        id: uuidv4(), startup_id: session.startup_id, session_id,
+        title: result.title || `${startup?.name || 'Pitch'} — rewrite`,
+        sections: result.sections, flagged: result.flagged || [],
+        length: length || '90s', score: session.verdict?.final_score ?? null,
+        addressed_gaps: selected.map((g) => ({ id: g.id, category: g.category, severity: g.severity })),
+        created_at: new Date(), updated_at: new Date(),
+      }
+      await db.collection('pitch_versions').insertOne(version)
+      const { _id, ...clean } = version
+      return json(clean)
+    }
+
+    if (path[0] === 'versions' && path[1] && method === 'GET') {
+      const v = await db.collection('pitch_versions').findOne({ id: path[1] })
+      if (!v) return json({ error: 'not found' }, 404)
+      const { _id, ...clean } = v
+      return json(clean)
+    }
+
+    if (route === '/versions' && method === 'GET') {
+      const url = new URL(request.url)
+      const startupId = url.searchParams.get('startup_id')
+      const q = startupId ? { startup_id: startupId } : {}
+      const rows = await db.collection('pitch_versions').find(q).sort({ created_at: -1 }).limit(50).toArray()
+      return json(rows.map(({ _id, ...r }) => r))
+    }
+
+    if (path[0] === 'versions' && path[1] && method === 'PUT') {
+      const body = await request.json()
+      const set = { updated_at: new Date() }
+      if (body.sections) set.sections = body.sections
+      if (body.title) set.title = body.title
+      await db.collection('pitch_versions').updateOne({ id: path[1] }, { $set: set })
+      const v = await db.collection('pitch_versions').findOne({ id: path[1] })
+      const { _id, ...clean } = v
+      return json(clean)
+    }
+
+    // ---- FOUNDER STUDIO aggregate ----
+    if (route === '/studio' && method === 'GET') {
+      const url = new URL(request.url)
+      const startupId = url.searchParams.get('startup_id')
+      if (!startupId) return json({ error: 'startup_id required' }, 400)
+      const startup = await db.collection('startups').findOne({ id: startupId })
+      const sessions = await db.collection('sessions').find({ startup_id: startupId }).sort({ started_at: 1 }).toArray()
+      const versions = await db.collection('pitch_versions').find({ startup_id: startupId }).sort({ created_at: -1 }).toArray()
+
+      const claims = []
+      const gaps = []
+      const score_history = []
+      for (const s of sessions) {
+        for (const c of (s.claims || [])) claims.push({ ...c, round: s.round_number, session_id: s.id })
+        for (const g of (s.gaps || [])) gaps.push({ ...g, round: s.round_number, session_id: s.id })
+        if (s.verdict) {
+          const dims = {}; (s.scorecard || []).forEach((sc) => { dims[sc.dimension] = sc.score })
+          score_history.push({ round: s.round_number, session_id: s.id, score: s.verdict.final_score, verdict: s.verdict.verdict, dims })
+        }
+      }
+      const sessionSummaries = sessions.map(({ _id, transcript, ...r }) => ({ id: r.id, round_number: r.round_number, status: r.status, mode: r.mode, panel_name: r.panel_name, is_demo: r.is_demo || false, started_at: r.started_at, verdict: r.verdict ? { final_score: r.verdict.final_score, verdict: r.verdict.verdict } : null, turns: (transcript || []).length }))
+      return json({
+        startup: startup ? (({ _id, ...r }) => r)(startup) : null,
+        sessions: sessionSummaries,
+        claims: claims.map(({ _id, ...c }) => c),
+        gaps: gaps.map(({ _id, ...g }) => g),
+        versions: versions.map(({ _id, ...v }) => v),
+        score_history,
+      })
+    }
+
+    // ---- DEMO seed (FlowPay) ----
+    if (route === '/demo/seed' && method === 'POST') {
+      const body = await request.json()
+      const user_id = body?.user_id || null
+      let startup = await db.collection('startups').findOne({ user_id, is_demo: true, name: 'FlowPay' })
+      if (startup) {
+        const sessions = await db.collection('sessions').find({ startup_id: startup.id }).sort({ round_number: 1 }).toArray()
+        const { _id, ...cleanStartup } = startup
+        return json({ startup: cleanStartup, session_ids: sessions.map((s) => s.id) })
+      }
+      startup = {
+        id: uuidv4(), user_id, is_demo: true,
+        name: 'FlowPay', founder: 'Demo Founder', industry: 'Fintech', stage: 'Seed',
+        one_liner: 'UPI-based B2B payments platform for small merchants in India',
+        problem: 'Small merchants struggle to accept and reconcile digital payments reliably',
+        customer: 'Small B2B merchants in tier-2 Indian cities', solution: 'One-tap UPI collection + instant settlement + reconciliation',
+        business_model: 'Take rate per transaction', pricing: '0.4% per transaction', revenue: 'Early revenue',
+        customers: '50', cac: '\u20b9200 (claimed)', retention: 'Not yet shown', market_size: '\u20b94,000 crore (top-down)',
+        competitors: 'Razorpay, PhonePe for Business', differentiation: 'Faster settlement', moat: 'Merchant relationships',
+        gtm: 'Paid acquisition', traction: '50 paying merchants', fundraising_status: 'Raising seed', evidence: 'Limited',
+        created_at: new Date(), updated_at: new Date(),
+      }
+      await db.collection('startups').insertOne(startup)
+      const s1 = buildDemoSession1(startup.id, user_id)
+      const s2 = buildDemoSession2(startup.id, user_id)
+      // stamp session_id into claims
+      s1.claims = (s1.claims || []).map((c) => ({ ...c, session_id: s1.id }))
+      s1.gaps = (s1.gaps || []).map((g) => ({ ...g, session_id: s1.id }))
+      s2.gaps = (s2.gaps || []).map((g) => ({ ...g, session_id: s2.id }))
+      await db.collection('sessions').insertMany([s1, s2])
+      const { _id, ...cleanStartup } = startup
+      return json({ startup: cleanStartup, session_ids: [s1.id, s2.id] })
     }
 
     return json({ error: `Route ${route} not found` }, 404)

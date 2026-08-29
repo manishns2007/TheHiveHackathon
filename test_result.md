@@ -203,6 +203,62 @@ backend:
         - working: true
           agent: "testing"
           comment: "✅ TESTED: Gap status updated to RESOLVED successfully. Verified status persisted in session. Working correctly."
+  - task: "AI Rewrite (/api/rewrite) + versions CRUD"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "POST /api/rewrite {session_id, gap_ids, length} -> LLM produces {title, sections(13 keys), flagged[]}, persists to pitch_versions. GET /api/versions/:id, GET /api/versions?startup_id=, PUT /api/versions/:id."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: POST /api/rewrite completed in 34.4s, returned all 13 section keys (opening, problem, customer, solution, market, traction, business_model, differentiation, moat, gtm, team, ask, closing) with content. Sections is an object (not array) as expected. GET /api/versions/:id retrieves version correctly. GET /api/versions?startup_id= returns array with version. PUT /api/versions/:id updates title and sections successfully, changes persisted. Version appears in /api/studio versions array. All CRUD operations working perfectly."
+  - task: "Founder Studio aggregate (/api/studio)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "GET /api/studio?startup_id= returns startup, session summaries, claims (with round), gaps (with round), versions, score_history [{round, score, verdict, dims}]."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: GET /api/studio returns complete aggregate data. Startup object present (FlowPay). Sessions: 2 summaries, each with verdict {final_score, verdict}. Claims: 4 total (flattened with round field). Gaps: 6 total (each with round field). Versions: array includes rewrite versions. Score_history: 2 entries [{round:1, score:61, dims:{...10 dimensions}}, {round:2, score:74, dims:{...10 dimensions}}]. All data structures correct."
+  - task: "Re-Pitch memory (session creation carries prior claims/gaps)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "POST /api/sessions loads prior ended sessions and stores session.memory; buildTurnUser injects a MEMORY block. round_number increments."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: Created fresh startup 'MemTest', ran session A with 1 pitch turn, ended with deliberation (score 28). Created session B for same startup. Session B has round_number=2 AND non-null memory field containing memory.claims (2 items), memory.gaps (6 items), and memory.last_score (28 from session A). Re-pitch memory carries forward correctly."
+  - task: "Demo Mode seed (/api/demo/seed FlowPay)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "POST /api/demo/seed {user_id} creates (or returns existing) FlowPay demo startup + 2 ended sessions (round1 score 61 with P0/P1/P1/P2 gaps + CAC contradiction; round2 score 74 Conditional Interest, previous_score 61). Deterministic, zero LLM."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: First call created FlowPay (is_demo=true) with 2 session_ids. Second call returned SAME startup ID and SAME 2 session_ids (idempotent). Session 1: round_number=1, verdict.final_score=61, verdict.verdict='Needs More Evidence', gaps with severities [P0, P1, P1, P2], 1 contradiction (CAC ₹400 vs ₹200), 10-dimension scorecard, transcript with founder+persona messages. Session 2: round_number=2, verdict.final_score=74, verdict.verdict='Conditional Interest', verdict.previous_score=61. All requirements met."
 
 frontend:
   - task: "Full SPA (landing, login, dashboard, onboarding, panels, pitch room, debrief)"
@@ -223,7 +279,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: false
 
 test_plan:
@@ -239,3 +295,5 @@ agent_communication:
       message: "✅ ALL BACKEND TESTS PASSED (7/7). Complete happy-path flow tested successfully: Auth (login + wrong password), Panels (3 panels, 9 personas, 10 dimensions), Startups CRUD (create/list/get), Sessions (create with initial beliefs, get with startup+personas), Pitch Turn LLM (CRITICAL: CAC contradiction Rs200 vs Rs400 detected with HIGH severity, economics belief dropped 6→4, transcript persisted), End Pitch LLM (verdict='Pass', score=22/100, 7 gaps with P0/P1/P2, 10-dimension scorecard, session status='ended'), Gap Update (status changed to RESOLVED). LLM integration working perfectly (Claude Opus 4-6 via Emergent proxy, response times 12-48s). No major issues found. Backend is production-ready."
     - agent: "testing"
       message: "✅ FRONTEND E2E TEST COMPLETE - ALL FEATURES WORKING! Tested full happy-path flow at https://pitch-stress-test.preview.emergentagent.com. Landing page verified (hero, buttons, 3 panels). Login with pre-filled credentials working. Dashboard loads correctly. Onboarding 4-step form completed successfully. Panel selection (VC Investment Committee) working. Pitch room UI perfect: timer, AI SIMULATION badge, 3 personas with confidence scores & progress bars, message input. CRITICAL SUCCESS: Contradiction detection working perfectly - sent 'CAC Rs 200 with 50 customers' then 'spent Rs 20,000 total' and system detected contradiction with HIGH severity alert in red box ('Rs 20,000 / 50 = Rs 400 per customer, not Rs 200 CAC'). 9 belief-drop chips displayed showing Unit Economics 5→3, Founder Credibility drops. Persona confidence numbers updated (48-50 range). End pitch deliberation completed. Debrief shows score 18/100, verdict 'Pass', strongest/weakest dimensions. All 3 tabs working: Gaps & Scorecard (8 gaps P0/P1/P2, 10-dimension scorecard), Panel Deliberation (consensus/disagreements/conditions/unresolved), Transcript (7 messages). Gap resolution working. No critical console errors. Mintlify light theme looks excellent. The core 'aha moment' (contradiction + belief visualization) is the standout feature and works flawlessly. Ready for production."
+    - agent: "testing"
+      message: "✅ NEW ENDPOINTS TESTED (4/4 PASSED). Demo Seed: POST /api/demo/seed creates FlowPay with 2 sessions, idempotent (returns same IDs on second call). Session 1: round=1, score=61, verdict='Needs More Evidence', gaps [P0,P1,P1,P2], CAC contradiction (₹400 vs ₹200), 10-dim scorecard, transcript with founder+persona. Session 2: round=2, score=74, verdict='Conditional Interest', previous_score=61. Founder Studio: GET /api/studio returns startup, 2 session summaries with verdicts, 4 claims (with round), 6 gaps (with round), versions array, score_history with 2 entries (round 1: score 61 with 10 dims, round 2: score 74 with 10 dims). AI Rewrite: POST /api/rewrite completed in 34.4s, returned all 13 section keys (opening, problem, customer, solution, market, traction, business_model, differentiation, moat, gtm, team, ask, closing), sections is object. GET/PUT /api/versions working, updates persisted, version appears in studio. Re-pitch Memory: Session B has round_number=2, memory field with claims (2), gaps (6), last_score (28). All endpoints working perfectly."

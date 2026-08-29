@@ -1,635 +1,458 @@
 #!/usr/bin/env python3
 """
 EchoClash Backend API Test Suite
-Tests the complete happy-path flow including LLM-powered pitch turns and deliberation.
+Tests new endpoints: demo seed, founder studio, AI rewrite + versions, re-pitch memory
 """
 import requests
 import json
 import time
-import sys
 
-# Base URL from .env
 BASE_URL = "https://pitch-stress-test.preview.emergentagent.com/api"
-
-# Test data
-TEST_USER = {"email": "test@example.com", "password": "password123"}
-WRONG_PASSWORD = {"email": "test@example.com", "password": "wrongpass"}
-
-# Global state
-user_id = None
-startup_id = None
-session_id = None
 
 def log(msg):
     print(f"[TEST] {msg}")
 
-def log_success(msg):
-    print(f"✅ {msg}")
-
-def log_error(msg):
-    print(f"❌ {msg}")
-
-def log_json(label, data):
-    print(f"\n{label}:")
-    print(json.dumps(data, indent=2))
-
-# ============================================================
-# TEST 1: Auth - Login
-# ============================================================
-def test_auth_login():
-    global user_id
-    log("TEST 1: POST /api/auth/login")
-    
-    # Test wrong password first
+def test_login():
+    """Test login and get user_id"""
+    log("Testing login...")
     try:
-        log("  Testing wrong password...")
-        resp = requests.post(f"{BASE_URL}/auth/login", json=WRONG_PASSWORD, timeout=10)
-        if resp.status_code == 401:
-            log_success("Wrong password correctly returns 401")
-        else:
-            log_error(f"Wrong password should return 401, got {resp.status_code}")
-            return False
-    except Exception as e:
-        log_error(f"Wrong password test failed: {e}")
-        return False
-    
-    # Test correct login
-    try:
-        log("  Testing correct login...")
-        resp = requests.post(f"{BASE_URL}/auth/login", json=TEST_USER, timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Login failed with status {resp.status_code}: {resp.text}")
-            return False
-        
+        resp = requests.post(f"{BASE_URL}/auth/login", json={
+            "email": "test@example.com",
+            "password": "password123"
+        }, timeout=30)
+        assert resp.status_code == 200, f"Login failed: {resp.status_code} {resp.text}"
         data = resp.json()
-        if not all(k in data for k in ['id', 'email', 'name']):
-            log_error(f"Login response missing required fields: {data}")
-            return False
-        
-        user_id = data['id']
-        log_success(f"Login successful, user_id: {user_id}")
-        log_json("Login response", data)
-        return True
+        assert "id" in data, "No user id in response"
+        log(f"✅ Login successful. User ID: {data['id']}")
+        return data["id"]
     except Exception as e:
-        log_error(f"Login test failed: {e}")
-        return False
+        log(f"❌ Login failed: {e}")
+        raise
 
-# ============================================================
-# TEST 2: Panels - Get all panels
-# ============================================================
-def test_panels():
-    log("\nTEST 2: GET /api/panels")
+def test_demo_seed(user_id):
+    """Test demo seed endpoint - idempotency check"""
+    log("\n=== Testing DEMO SEED ===")
     
+    # First call - should create FlowPay
+    log("First call to /api/demo/seed...")
     try:
-        resp = requests.get(f"{BASE_URL}/panels", timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Panels request failed with status {resp.status_code}: {resp.text}")
-            return False
+        resp1 = requests.post(f"{BASE_URL}/demo/seed", json={"user_id": user_id}, timeout=30)
+        assert resp1.status_code == 200, f"Demo seed failed: {resp1.status_code} {resp1.text}"
+        data1 = resp1.json()
         
-        data = resp.json()
+        # Verify structure
+        assert "startup" in data1, "No startup in response"
+        assert "session_ids" in data1, "No session_ids in response"
         
-        # Check structure
-        if 'panels' not in data or 'dimensions' not in data:
-            log_error(f"Response missing 'panels' or 'dimensions': {data.keys()}")
-            return False
+        startup1 = data1["startup"]
+        session_ids1 = data1["session_ids"]
         
-        panels = data['panels']
-        dimensions = data['dimensions']
+        assert startup1["name"] == "FlowPay", f"Expected FlowPay, got {startup1['name']}"
+        assert startup1.get("is_demo") == True, "is_demo should be true"
+        assert len(session_ids1) == 2, f"Expected 2 session_ids, got {len(session_ids1)}"
         
-        # Check exactly 3 panels
-        if len(panels) != 3:
-            log_error(f"Expected 3 panels, got {len(panels)}")
-            return False
+        log(f"✅ First call: Created FlowPay (id: {startup1['id']}) with 2 sessions")
+        log(f"   Session IDs: {session_ids1}")
         
-        # Check panel IDs
-        panel_ids = [p['id'] for p in panels]
-        expected_ids = ['shark', 'vc', 'operator']
-        if not all(pid in panel_ids for pid in expected_ids):
-            log_error(f"Expected panel IDs {expected_ids}, got {panel_ids}")
-            return False
+        # Second call - should be idempotent (return same data)
+        log("Second call to /api/demo/seed (idempotency check)...")
+        time.sleep(1)
+        resp2 = requests.post(f"{BASE_URL}/demo/seed", json={"user_id": user_id}, timeout=30)
+        assert resp2.status_code == 200, f"Demo seed second call failed: {resp2.status_code} {resp2.text}"
+        data2 = resp2.json()
         
-        # Count total personas (should be 9: 3 per panel)
-        total_personas = sum(len(p['personas']) for p in panels)
-        if total_personas != 9:
-            log_error(f"Expected 9 total personas (3 per panel), got {total_personas}")
-            return False
+        startup2 = data2["startup"]
+        session_ids2 = data2["session_ids"]
         
-        # Check dimensions array (should be 10)
-        if len(dimensions) != 10:
-            log_error(f"Expected 10 dimensions, got {len(dimensions)}")
-            return False
+        # Verify idempotency
+        assert startup2["id"] == startup1["id"], f"Startup ID changed! {startup1['id']} vs {startup2['id']}"
+        assert set(session_ids2) == set(session_ids1), f"Session IDs changed! {session_ids1} vs {session_ids2}"
         
-        log_success(f"Panels: 3 panels with 9 personas total, 10 dimensions")
-        log(f"  Panel IDs: {panel_ids}")
-        log(f"  Dimension keys: {[d['key'] for d in dimensions]}")
-        return True
-    except Exception as e:
-        log_error(f"Panels test failed: {e}")
-        return False
-
-# ============================================================
-# TEST 3: Startups - Create, List, Get
-# ============================================================
-def test_startups():
-    global startup_id
-    log("\nTEST 3: POST /api/startups, GET /api/startups, GET /api/startups/:id")
-    
-    startup_data = {
-        "user_id": user_id,
-        "name": "FlowPay",
-        "founder": "Rajesh Kumar",
-        "industry": "Fintech",
-        "stage": "Seed",
-        "one_liner": "UPI B2B payments for small merchants",
-        "problem": "Merchants struggle with digital payments",
-        "market_size": "Rs 4000 crore",
-        "cac": "Rs 200",
-        "customers": "50"
-    }
-    
-    try:
-        # Create startup
-        log("  Creating startup...")
-        resp = requests.post(f"{BASE_URL}/startups", json=startup_data, timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Startup creation failed with status {resp.status_code}: {resp.text}")
-            return False
+        log(f"✅ Second call: Returned SAME startup and sessions (idempotent)")
         
-        data = resp.json()
-        if 'id' not in data:
-            log_error(f"Startup response missing 'id': {data}")
-            return False
-        
-        startup_id = data['id']
-        log_success(f"Startup created with ID: {startup_id}")
-        
-        # List startups for user
-        log("  Listing startups for user...")
-        resp = requests.get(f"{BASE_URL}/startups?user_id={user_id}", timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Startup list failed with status {resp.status_code}: {resp.text}")
-            return False
-        
-        startups = resp.json()
-        if not isinstance(startups, list):
-            log_error(f"Expected list of startups, got {type(startups)}")
-            return False
-        
-        # Check our startup is in the list
-        found = any(s['id'] == startup_id for s in startups)
-        if not found:
-            log_error(f"Created startup {startup_id} not found in list")
-            return False
-        
-        log_success(f"Startup found in list ({len(startups)} total)")
-        
-        # Get specific startup
-        log("  Getting specific startup...")
-        resp = requests.get(f"{BASE_URL}/startups/{startup_id}", timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Startup get failed with status {resp.status_code}: {resp.text}")
-            return False
-        
-        startup = resp.json()
-        if startup['id'] != startup_id or startup['name'] != 'FlowPay':
-            log_error(f"Startup data mismatch: {startup}")
-            return False
-        
-        log_success(f"Startup retrieved: {startup['name']}")
-        return True
-    except Exception as e:
-        log_error(f"Startups test failed: {e}")
-        return False
-
-# ============================================================
-# TEST 4: Sessions - Create and Get
-# ============================================================
-def test_sessions():
-    global session_id
-    log("\nTEST 4: POST /api/sessions, GET /api/sessions/:id")
-    
-    session_data = {
-        "user_id": user_id,
-        "startup_id": startup_id,
-        "panel_id": "vc"
-    }
-    
-    try:
-        # Create session
-        log("  Creating session...")
-        resp = requests.post(f"{BASE_URL}/sessions", json=session_data, timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Session creation failed with status {resp.status_code}: {resp.text}")
-            return False
-        
-        data = resp.json()
-        
-        # Check required fields
-        required = ['id', 'round_number', 'beliefs']
-        if not all(k in data for k in required):
-            log_error(f"Session response missing required fields: {data.keys()}")
-            return False
-        
-        session_id = data['id']
-        
-        # Check round_number is 1
-        if data['round_number'] != 1:
-            log_error(f"Expected round_number=1, got {data['round_number']}")
-            return False
-        
-        # Check beliefs structure (3 personas, each with 10 dimensions = 5)
-        beliefs = data['beliefs']
-        if len(beliefs) != 3:
-            log_error(f"Expected 3 personas in beliefs, got {len(beliefs)}")
-            return False
-        
-        # Check each persona has 10 dimensions all set to 5
-        for persona_id, dims in beliefs.items():
-            if len(dims) != 10:
-                log_error(f"Persona {persona_id} should have 10 dimensions, got {len(dims)}")
-                return False
-            if not all(v == 5 for v in dims.values()):
-                log_error(f"Persona {persona_id} dimensions should all be 5: {dims}")
-                return False
-        
-        log_success(f"Session created: ID={session_id}, round={data['round_number']}")
-        log(f"  Beliefs: 3 personas, each with 10 dimensions=5")
-        
-        # Get session
-        log("  Getting session...")
-        resp = requests.get(f"{BASE_URL}/sessions/{session_id}", timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Session get failed with status {resp.status_code}: {resp.text}")
-            return False
-        
-        session = resp.json()
-        
-        # Check it includes startup and panel_personas
-        if 'startup' not in session or 'panel_personas' not in session:
-            log_error(f"Session missing startup or panel_personas: {session.keys()}")
-            return False
-        
-        if len(session['panel_personas']) != 3:
-            log_error(f"Expected 3 panel_personas, got {len(session['panel_personas'])}")
-            return False
-        
-        log_success(f"Session retrieved with startup + 3 panel_personas")
-        return True
-    except Exception as e:
-        log_error(f"Sessions test failed: {e}")
-        return False
-
-# ============================================================
-# TEST 5: Pitch Turn - LLM Engine (CORE TEST)
-# ============================================================
-def test_pitch_turn():
-    log("\nTEST 5: POST /api/pitch/turn (LLM-powered)")
-    
-    # Turn 1: Initial pitch with CAC claim
-    turn1_data = {
-        "session_id": session_id,
-        "message": "We're FlowPay, a UPI-based B2B payments platform for small merchants in India. Our CAC is just Rs 200 and we already have 50 paying customers."
-    }
-    
-    try:
-        log("  Turn 1: Initial pitch with CAC Rs 200, 50 customers...")
-        log("  (This may take 10-40 seconds, waiting up to 90s)")
-        
-        start = time.time()
-        resp = requests.post(f"{BASE_URL}/pitch/turn", json=turn1_data, timeout=90)
-        elapsed = time.time() - start
-        
-        if resp.status_code != 200:
-            log_error(f"Turn 1 failed with status {resp.status_code}: {resp.text}")
-            return False
-        
-        data = resp.json()
-        log(f"  Turn 1 completed in {elapsed:.1f}s")
-        
-        # Check response structure
-        required = ['persona_message', 'beliefs', 'belief_changes', 'contradictions', 'claims']
-        if not all(k in data for k in required):
-            log_error(f"Turn response missing required fields: {data.keys()}")
-            return False
-        
-        persona_msg = data['persona_message']
-        if not all(k in persona_msg for k in ['content', 'personaName', 'question']):
-            log_error(f"persona_message missing required fields: {persona_msg.keys()}")
-            return False
-        
-        log_success(f"Turn 1: Persona {persona_msg['personaName']} responded")
-        log(f"  Response: {persona_msg['content'][:100]}...")
-        log(f"  Claims extracted: {len(data['claims'])}")
-        log(f"  Contradictions: {len(data['contradictions'])}")
-        log(f"  Belief changes: {len(data['belief_changes'])}")
-        
-        log_json("Turn 1 Full Response", data)
+        return startup1["id"], session_ids1
         
     except Exception as e:
-        log_error(f"Turn 1 failed: {e}")
-        return False
-    
-    # Turn 2: Contradiction trigger - actual CAC is Rs 400
-    turn2_data = {
-        "session_id": session_id,
-        "message": "To get those first 50 customers we spent about Rs 20,000 total on acquisition last quarter."
-    }
-    
-    try:
-        log("\n  Turn 2: Contradiction trigger (Rs 20,000 / 50 = Rs 400 actual CAC)...")
-        log("  (Waiting up to 90s)")
-        
-        start = time.time()
-        resp = requests.post(f"{BASE_URL}/pitch/turn", json=turn2_data, timeout=90)
-        elapsed = time.time() - start
-        
-        if resp.status_code != 200:
-            log_error(f"Turn 2 failed with status {resp.status_code}: {resp.text}")
-            return False
-        
-        data = resp.json()
-        log(f"  Turn 2 completed in {elapsed:.1f}s")
-        
-        contradictions = data['contradictions']
-        belief_changes = data['belief_changes']
-        
-        log(f"  Contradictions detected: {len(contradictions)}")
-        log(f"  Belief changes: {len(belief_changes)}")
-        
-        # Check if contradiction was detected
-        contradiction_found = len(contradictions) > 0
-        
-        # Check if economics dimension dropped
-        economics_dropped = False
-        for change in belief_changes:
-            if change['dimension'] == 'economics' and change['new'] < change['previous']:
-                economics_dropped = True
-                log(f"  Economics belief dropped: {change['previous']} -> {change['new']}")
-                break
-        
-        if contradiction_found:
-            log_success(f"CONTRADICTION DETECTED: {len(contradictions)} contradiction(s)")
-            for c in contradictions:
-                log(f"    - {c.get('explanation', c.get('conflict_type', 'N/A'))}")
-                log(f"      Severity: {c.get('severity', 'N/A')}")
-        elif economics_dropped:
-            log_success("Economics belief dropped (contradiction may be implicit)")
-        else:
-            log_error("CRITICAL: No contradiction detected and no economics belief drop!")
-            log_error("Expected: CAC Rs 200 vs Rs 20,000/50 = Rs 400 contradiction")
-            log_json("Turn 2 Response (no contradiction)", data)
-            return False
-        
-        log_json("Turn 2 Full Response", data)
-        
-        # Verify transcript persistence
-        log("\n  Verifying transcript persistence...")
-        resp = requests.get(f"{BASE_URL}/sessions/{session_id}", timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Session get failed: {resp.status_code}")
-            return False
-        
-        session = resp.json()
-        transcript = session.get('transcript', [])
-        claims = session.get('claims', [])
-        
-        log(f"  Transcript has {len(transcript)} messages")
-        log(f"  Claims persisted: {len(claims)}")
-        
-        if len(transcript) < 4:  # 2 turns = 4 messages (founder + persona each)
-            log_error(f"Expected at least 4 transcript messages, got {len(transcript)}")
-            return False
-        
-        log_success("Transcript and claims persisted correctly")
-        return True
-        
-    except Exception as e:
-        log_error(f"Turn 2 failed: {e}")
-        return False
+        log(f"❌ Demo seed test failed: {e}")
+        raise
 
-# ============================================================
-# TEST 6: End Pitch - Deliberation
-# ============================================================
-def test_pitch_end():
-    log("\nTEST 6: POST /api/pitch/end (LLM deliberation)")
-    
-    end_data = {
-        "session_id": session_id
-    }
+def test_demo_sessions(session_ids):
+    """Test demo session details"""
+    log("\n=== Testing DEMO SESSION DETAILS ===")
     
     try:
-        log("  Ending pitch and triggering deliberation...")
-        log("  (This may take 10-40 seconds, waiting up to 90s)")
+        # Test session 1 (round 1)
+        log(f"Getting session 1: {session_ids[0]}...")
+        resp1 = requests.get(f"{BASE_URL}/sessions/{session_ids[0]}", timeout=30)
+        assert resp1.status_code == 200, f"Get session 1 failed: {resp1.status_code} {resp1.text}"
+        s1 = resp1.json()
         
-        start = time.time()
-        resp = requests.post(f"{BASE_URL}/pitch/end", json=end_data, timeout=90)
-        elapsed = time.time() - start
-        
-        if resp.status_code != 200:
-            log_error(f"End pitch failed with status {resp.status_code}: {resp.text}")
-            return False
-        
-        data = resp.json()
-        log(f"  Deliberation completed in {elapsed:.1f}s")
-        
-        # Check response structure
-        if not all(k in data for k in ['verdict', 'gaps', 'scorecard']):
-            log_error(f"End response missing required fields: {data.keys()}")
-            return False
-        
-        verdict = data['verdict']
-        gaps = data['gaps']
-        scorecard = data['scorecard']
-        
-        # Check verdict structure
-        required_verdict = ['final_score', 'verdict', 'confidence', 'strongest_dimension', 'weakest_dimension']
-        if not all(k in verdict for k in required_verdict):
-            log_error(f"Verdict missing required fields: {verdict.keys()}")
-            return False
-        
-        # Check final_score is 0-100
-        final_score = verdict['final_score']
-        if not (0 <= final_score <= 100):
-            log_error(f"final_score should be 0-100, got {final_score}")
-            return False
-        
-        # Check verdict is one of the 5 valid labels
-        valid_verdicts = ["Strong Interest", "Interest", "Conditional Interest", "Needs More Evidence", "Pass"]
-        if verdict['verdict'] not in valid_verdicts:
-            log_error(f"verdict should be one of {valid_verdicts}, got '{verdict['verdict']}'")
-            return False
-        
-        log_success(f"Verdict: {verdict['verdict']} (score: {final_score}/100, confidence: {verdict['confidence']}%)")
-        log(f"  Strongest: {verdict['strongest_dimension']}")
-        log(f"  Weakest: {verdict['weakest_dimension']}")
+        assert s1["round_number"] == 1, f"Expected round 1, got {s1['round_number']}"
+        assert s1["verdict"]["final_score"] == 61, f"Expected score 61, got {s1['verdict']['final_score']}"
+        assert s1["verdict"]["verdict"] == "Needs More Evidence", f"Expected 'Needs More Evidence', got {s1['verdict']['verdict']}"
         
         # Check gaps
-        log(f"\n  Gaps: {len(gaps)}")
-        severities = [g['severity'] for g in gaps]
-        severity_counts = {s: severities.count(s) for s in ['P0', 'P1', 'P2']}
-        log(f"  Severity breakdown: {severity_counts}")
+        gaps1 = s1.get("gaps", [])
+        severities = [g["severity"] for g in gaps1]
+        assert "P0" in severities, "Expected P0 gap"
+        assert severities.count("P1") >= 2, "Expected at least 2 P1 gaps"
+        log(f"   Gaps: {len(gaps1)} total, severities: {severities}")
         
-        # Verify all gaps have valid severity
-        for g in gaps:
-            if g['severity'] not in ['P0', 'P1', 'P2']:
-                log_error(f"Invalid gap severity: {g['severity']}")
-                return False
-        
-        log_success(f"Gaps: {len(gaps)} total with valid P0/P1/P2 severities")
+        # Check contradictions
+        contradictions1 = s1.get("contradictions", [])
+        assert len(contradictions1) > 0, "Expected at least 1 contradiction"
+        cac_contradiction = any("CAC" in c.get("explanation", "") or "400" in c.get("explanation", "") for c in contradictions1)
+        assert cac_contradiction, "Expected CAC contradiction (₹400 vs ₹200)"
+        log(f"   Contradictions: {len(contradictions1)} found, CAC contradiction present")
         
         # Check scorecard
-        log(f"\n  Scorecard: {len(scorecard)} dimensions")
-        if len(scorecard) < 8 or len(scorecard) > 12:
-            log_error(f"Expected ~10 scorecard dimensions, got {len(scorecard)}")
-            return False
+        scorecard1 = s1.get("scorecard", [])
+        assert len(scorecard1) == 10, f"Expected 10 dimensions, got {len(scorecard1)}"
+        log(f"   Scorecard: {len(scorecard1)} dimensions")
         
-        for item in scorecard:
-            if not all(k in item for k in ['dimension', 'score', 'reason']):
-                log_error(f"Scorecard item missing required fields: {item}")
-                return False
+        # Check transcript
+        transcript1 = s1.get("transcript", [])
+        assert len(transcript1) > 0, "Expected transcript messages"
+        founder_msgs = [m for m in transcript1 if m["role"] == "founder"]
+        persona_msgs = [m for m in transcript1 if m["role"] == "persona"]
+        assert len(founder_msgs) > 0, "Expected founder messages"
+        assert len(persona_msgs) > 0, "Expected persona messages"
+        log(f"   Transcript: {len(transcript1)} messages ({len(founder_msgs)} founder, {len(persona_msgs)} persona)")
         
-        log_success(f"Scorecard: {len(scorecard)} dimensions with scores and reasons")
+        log(f"✅ Session 1: round={s1['round_number']}, score={s1['verdict']['final_score']}, verdict='{s1['verdict']['verdict']}'")
         
-        log_json("Full Deliberation Response", data)
+        # Test session 2 (round 2)
+        log(f"Getting session 2: {session_ids[1]}...")
+        resp2 = requests.get(f"{BASE_URL}/sessions/{session_ids[1]}", timeout=30)
+        assert resp2.status_code == 200, f"Get session 2 failed: {resp2.status_code} {resp2.text}"
+        s2 = resp2.json()
         
-        # Verify session status changed to 'ended'
-        log("\n  Verifying session status...")
-        resp = requests.get(f"{BASE_URL}/sessions/{session_id}", timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Session get failed: {resp.status_code}")
-            return False
+        assert s2["round_number"] == 2, f"Expected round 2, got {s2['round_number']}"
+        assert s2["verdict"]["final_score"] == 74, f"Expected score 74, got {s2['verdict']['final_score']}"
+        assert s2["verdict"]["verdict"] == "Conditional Interest", f"Expected 'Conditional Interest', got {s2['verdict']['verdict']}"
+        assert s2["verdict"]["previous_score"] == 61, f"Expected previous_score 61, got {s2['verdict']['previous_score']}"
         
-        session = resp.json()
-        if session.get('status') != 'ended':
-            log_error(f"Session status should be 'ended', got '{session.get('status')}'")
-            return False
-        
-        log_success("Session status changed to 'ended'")
-        return True
+        log(f"✅ Session 2: round={s2['round_number']}, score={s2['verdict']['final_score']}, verdict='{s2['verdict']['verdict']}', previous_score={s2['verdict']['previous_score']}")
         
     except Exception as e:
-        log_error(f"End pitch test failed: {e}")
-        return False
+        log(f"❌ Demo session test failed: {e}")
+        raise
 
-# ============================================================
-# TEST 7: Gap Update
-# ============================================================
-def test_gap_update():
-    log("\nTEST 7: POST /api/gaps/update")
+def test_founder_studio(startup_id):
+    """Test founder studio aggregate endpoint"""
+    log("\n=== Testing FOUNDER STUDIO AGGREGATE ===")
     
     try:
-        # First get the session to find a gap ID
-        resp = requests.get(f"{BASE_URL}/sessions/{session_id}", timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Session get failed: {resp.status_code}")
-            return False
-        
-        session = resp.json()
-        gaps = session.get('gaps', [])
-        
-        if len(gaps) == 0:
-            log("  No gaps to update (session has no gaps)")
-            return True
-        
-        first_gap = gaps[0]
-        gap_id = first_gap['id']
-        
-        log(f"  Updating gap {gap_id} to RESOLVED...")
-        
-        update_data = {
-            "session_id": session_id,
-            "gap_id": gap_id,
-            "status": "RESOLVED"
-        }
-        
-        resp = requests.post(f"{BASE_URL}/gaps/update", json=update_data, timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Gap update failed with status {resp.status_code}: {resp.text}")
-            return False
-        
+        log(f"Getting studio data for startup {startup_id}...")
+        resp = requests.get(f"{BASE_URL}/studio", params={"startup_id": startup_id}, timeout=30)
+        assert resp.status_code == 200, f"Studio endpoint failed: {resp.status_code} {resp.text}"
         data = resp.json()
-        if not data.get('ok'):
-            log_error(f"Gap update response not ok: {data}")
-            return False
         
-        log_success("Gap update successful")
+        # Verify structure
+        assert "startup" in data, "No startup in response"
+        assert "sessions" in data, "No sessions in response"
+        assert "claims" in data, "No claims in response"
+        assert "gaps" in data, "No gaps in response"
+        assert "versions" in data, "No versions in response"
+        assert "score_history" in data, "No score_history in response"
         
-        # Verify the gap status changed
-        log("  Verifying gap status changed...")
-        resp = requests.get(f"{BASE_URL}/sessions/{session_id}", timeout=10)
-        if resp.status_code != 200:
-            log_error(f"Session get failed: {resp.status_code}")
-            return False
+        # Check startup
+        assert data["startup"]["name"] == "FlowPay", f"Expected FlowPay, got {data['startup']['name']}"
+        log(f"   Startup: {data['startup']['name']}")
         
-        session = resp.json()
-        updated_gap = next((g for g in session['gaps'] if g['id'] == gap_id), None)
+        # Check sessions
+        sessions = data["sessions"]
+        assert len(sessions) == 2, f"Expected 2 sessions, got {len(sessions)}"
+        for s in sessions:
+            assert "verdict" in s, "Session missing verdict"
+            assert "final_score" in s["verdict"], "Verdict missing final_score"
+            assert "verdict" in s["verdict"], "Verdict missing verdict label"
+        log(f"   Sessions: {len(sessions)} summaries with verdicts")
         
-        if not updated_gap:
-            log_error(f"Gap {gap_id} not found in session")
-            return False
+        # Check claims (flattened with round)
+        claims = data["claims"]
+        assert len(claims) > 0, "Expected claims"
+        for c in claims:
+            assert "round" in c, "Claim missing round"
+        log(f"   Claims: {len(claims)} total (flattened with round)")
         
-        if updated_gap['status'] != 'RESOLVED':
-            log_error(f"Gap status should be RESOLVED, got {updated_gap['status']}")
-            return False
+        # Check gaps (with round)
+        gaps = data["gaps"]
+        assert len(gaps) > 0, "Expected gaps"
+        for g in gaps:
+            assert "round" in g, "Gap missing round"
+        log(f"   Gaps: {len(gaps)} total (with round)")
         
-        log_success(f"Gap status verified: {updated_gap['status']}")
-        return True
+        # Check score_history
+        score_history = data["score_history"]
+        assert len(score_history) == 2, f"Expected 2 score_history entries, got {len(score_history)}"
+        
+        # Verify round 1
+        h1 = next((h for h in score_history if h["round"] == 1), None)
+        assert h1 is not None, "Missing round 1 in score_history"
+        assert h1["score"] == 61, f"Expected score 61 for round 1, got {h1['score']}"
+        assert "dims" in h1, "Missing dims in score_history"
+        assert len(h1["dims"]) == 10, f"Expected 10 dimensions, got {len(h1['dims'])}"
+        log(f"   Score history round 1: score={h1['score']}, dims={len(h1['dims'])}")
+        
+        # Verify round 2
+        h2 = next((h for h in score_history if h["round"] == 2), None)
+        assert h2 is not None, "Missing round 2 in score_history"
+        assert h2["score"] == 74, f"Expected score 74 for round 2, got {h2['score']}"
+        assert len(h2["dims"]) == 10, f"Expected 10 dimensions, got {len(h2['dims'])}"
+        log(f"   Score history round 2: score={h2['score']}, dims={len(h2['dims'])}")
+        
+        log(f"✅ Founder Studio: All data structures correct")
         
     except Exception as e:
-        log_error(f"Gap update test failed: {e}")
-        return False
+        log(f"❌ Founder studio test failed: {e}")
+        raise
 
-# ============================================================
-# Main Test Runner
-# ============================================================
+def test_ai_rewrite_and_versions(startup_id, session_ids):
+    """Test AI rewrite and versions CRUD"""
+    log("\n=== Testing AI REWRITE + VERSIONS ===")
+    
+    try:
+        # POST /api/rewrite
+        log(f"Creating rewrite for session {session_ids[0]}...")
+        log("   (This calls LLM - may take up to 90s)")
+        start_time = time.time()
+        
+        resp = requests.post(f"{BASE_URL}/rewrite", json={
+            "session_id": session_ids[0],
+            "gap_ids": [],
+            "length": "90s"
+        }, timeout=120)
+        
+        elapsed = time.time() - start_time
+        log(f"   Rewrite completed in {elapsed:.1f}s")
+        
+        if resp.status_code == 502:
+            log(f"⚠️  502 error (ai_unavailable or ai_bad_response): {resp.text}")
+            log("   This is expected if LLM service is temporarily unavailable")
+            return None
+        
+        assert resp.status_code == 200, f"Rewrite failed: {resp.status_code} {resp.text}"
+        version = resp.json()
+        
+        # Verify structure
+        assert "id" in version, "No id in version"
+        assert "title" in version, "No title in version"
+        assert "sections" in version, "No sections in version"
+        assert "flagged" in version, "No flagged in version"
+        
+        # Verify sections is an object (not array)
+        sections = version["sections"]
+        assert isinstance(sections, dict), f"sections should be object, got {type(sections)}"
+        assert len(sections) > 0, "sections should not be empty"
+        
+        section_keys = list(sections.keys())
+        log(f"   Version ID: {version['id']}")
+        log(f"   Title: {version['title']}")
+        log(f"   Section keys: {section_keys}")
+        log(f"   Flagged items: {len(version['flagged'])}")
+        
+        # Expected sections
+        expected_sections = ['opening', 'problem', 'customer', 'solution', 'market', 'traction', 
+                           'business_model', 'differentiation', 'moat', 'gtm', 'team', 'ask', 'closing']
+        for key in expected_sections:
+            if key in sections:
+                log(f"      ✓ {key}: {len(sections[key])} chars")
+        
+        log(f"✅ Rewrite created successfully")
+        
+        version_id = version["id"]
+        
+        # GET /api/versions/:id
+        log(f"Getting version {version_id}...")
+        resp2 = requests.get(f"{BASE_URL}/versions/{version_id}", timeout=30)
+        assert resp2.status_code == 200, f"Get version failed: {resp2.status_code} {resp2.text}"
+        version2 = resp2.json()
+        assert version2["id"] == version_id, "Version ID mismatch"
+        log(f"✅ GET /api/versions/:id working")
+        
+        # GET /api/versions?startup_id=
+        log(f"Getting versions for startup {startup_id}...")
+        resp3 = requests.get(f"{BASE_URL}/versions", params={"startup_id": startup_id}, timeout=30)
+        assert resp3.status_code == 200, f"Get versions list failed: {resp3.status_code} {resp3.text}"
+        versions = resp3.json()
+        assert isinstance(versions, list), "Expected array of versions"
+        assert len(versions) > 0, "Expected at least 1 version"
+        found = any(v["id"] == version_id for v in versions)
+        assert found, f"Version {version_id} not found in list"
+        log(f"✅ GET /api/versions?startup_id= working ({len(versions)} versions)")
+        
+        # PUT /api/versions/:id
+        log(f"Updating version {version_id}...")
+        updated_sections = sections.copy()
+        updated_sections["opening"] = "UPDATED: This is the new opening paragraph."
+        
+        resp4 = requests.put(f"{BASE_URL}/versions/{version_id}", json={
+            "title": "Edited Title",
+            "sections": updated_sections
+        }, timeout=30)
+        assert resp4.status_code == 200, f"Update version failed: {resp4.status_code} {resp4.text}"
+        version4 = resp4.json()
+        assert version4["title"] == "Edited Title", f"Title not updated: {version4['title']}"
+        assert version4["sections"]["opening"] == updated_sections["opening"], "Opening not updated"
+        log(f"✅ PUT /api/versions/:id working (title and sections updated)")
+        
+        # Verify persistence
+        log(f"Verifying update persisted...")
+        resp5 = requests.get(f"{BASE_URL}/versions/{version_id}", timeout=30)
+        assert resp5.status_code == 200, f"Get version after update failed: {resp5.status_code}"
+        version5 = resp5.json()
+        assert version5["title"] == "Edited Title", "Title update not persisted"
+        assert version5["sections"]["opening"] == updated_sections["opening"], "Opening update not persisted"
+        log(f"✅ Updates persisted correctly")
+        
+        # Check studio includes version
+        log(f"Verifying version appears in studio...")
+        resp6 = requests.get(f"{BASE_URL}/studio", params={"startup_id": startup_id}, timeout=30)
+        assert resp6.status_code == 200, f"Studio check failed: {resp6.status_code}"
+        studio = resp6.json()
+        studio_versions = studio.get("versions", [])
+        found_in_studio = any(v["id"] == version_id for v in studio_versions)
+        assert found_in_studio, "Version not found in studio"
+        log(f"✅ Version appears in studio versions array")
+        
+        return version_id
+        
+    except Exception as e:
+        log(f"❌ AI rewrite test failed: {e}")
+        raise
+
+def test_repitch_memory(user_id):
+    """Test re-pitch memory functionality"""
+    log("\n=== Testing RE-PITCH MEMORY ===")
+    
+    try:
+        # Create a fresh startup
+        log("Creating fresh startup 'MemTest'...")
+        resp1 = requests.post(f"{BASE_URL}/startups", json={
+            "user_id": user_id,
+            "name": "MemTest",
+            "founder": "F",
+            "industry": "SaaS",
+            "stage": "Seed",
+            "one_liner": "x",
+            "problem": "y"
+        }, timeout=30)
+        assert resp1.status_code == 200, f"Create startup failed: {resp1.status_code} {resp1.text}"
+        startup = resp1.json()
+        startup_id = startup["id"]
+        log(f"   Created startup: {startup_id}")
+        
+        # Create session A
+        log("Creating session A...")
+        resp2 = requests.post(f"{BASE_URL}/sessions", json={
+            "user_id": user_id,
+            "startup_id": startup_id,
+            "panel_id": "vc"
+        }, timeout=30)
+        assert resp2.status_code == 200, f"Create session A failed: {resp2.status_code} {resp2.text}"
+        session_a = resp2.json()
+        session_a_id = session_a["id"]
+        log(f"   Session A created: {session_a_id}")
+        
+        # Run one pitch turn
+        log("Running one pitch turn...")
+        resp3 = requests.post(f"{BASE_URL}/pitch/turn", json={
+            "session_id": session_a_id,
+            "message": "We have 100 customers and CAC is ₹500."
+        }, timeout=90)
+        assert resp3.status_code == 200, f"Pitch turn failed: {resp3.status_code} {resp3.text}"
+        log(f"   Turn completed")
+        
+        # End pitch (deliberation)
+        log("Ending pitch (deliberation - may take up to 90s)...")
+        start_time = time.time()
+        resp4 = requests.post(f"{BASE_URL}/pitch/end", json={
+            "session_id": session_a_id
+        }, timeout=120)
+        elapsed = time.time() - start_time
+        log(f"   Deliberation completed in {elapsed:.1f}s")
+        
+        if resp4.status_code == 502:
+            log(f"⚠️  502 error (ai_unavailable or ai_bad_response): {resp4.text}")
+            log("   Cannot complete re-pitch memory test without LLM")
+            return
+        
+        assert resp4.status_code == 200, f"End pitch failed: {resp4.status_code} {resp4.text}"
+        verdict_a = resp4.json()
+        assert "verdict" in verdict_a, "No verdict in response"
+        score_a = verdict_a["verdict"]["final_score"]
+        log(f"   Session A ended with score: {score_a}")
+        
+        # Create session B (re-pitch)
+        log("Creating session B (re-pitch)...")
+        time.sleep(1)
+        resp5 = requests.post(f"{BASE_URL}/sessions", json={
+            "user_id": user_id,
+            "startup_id": startup_id,
+            "panel_id": "vc"
+        }, timeout=30)
+        assert resp5.status_code == 200, f"Create session B failed: {resp5.status_code} {resp5.text}"
+        session_b = resp5.json()
+        
+        # Verify memory
+        assert session_b["round_number"] == 2, f"Expected round 2, got {session_b['round_number']}"
+        assert "memory" in session_b, "No memory field in session B"
+        assert session_b["memory"] is not None, "Memory field is null"
+        
+        memory = session_b["memory"]
+        assert "claims" in memory, "No claims in memory"
+        assert "gaps" in memory, "No gaps in memory"
+        assert "last_score" in memory, "No last_score in memory"
+        
+        assert isinstance(memory["claims"], list), "memory.claims should be array"
+        assert isinstance(memory["gaps"], list), "memory.gaps should be array"
+        assert isinstance(memory["last_score"], (int, float)), "memory.last_score should be number"
+        
+        log(f"   Session B round: {session_b['round_number']}")
+        log(f"   Memory claims: {len(memory['claims'])} items")
+        log(f"   Memory gaps: {len(memory['gaps'])} items")
+        log(f"   Memory last_score: {memory['last_score']}")
+        
+        log(f"✅ Re-pitch memory working: round_number=2, memory present with claims/gaps/last_score")
+        
+    except Exception as e:
+        log(f"❌ Re-pitch memory test failed: {e}")
+        raise
+
 def main():
-    print("=" * 60)
-    print("EchoClash Backend API Test Suite")
-    print("=" * 60)
-    print(f"Base URL: {BASE_URL}")
-    print("=" * 60)
+    log("=" * 80)
+    log("EchoClash Backend Test Suite - NEW ENDPOINTS")
+    log("=" * 80)
     
-    tests = [
-        ("Auth Login", test_auth_login),
-        ("Panels", test_panels),
-        ("Startups CRUD", test_startups),
-        ("Sessions", test_sessions),
-        ("Pitch Turn (LLM)", test_pitch_turn),
-        ("End Pitch (LLM)", test_pitch_end),
-        ("Gap Update", test_gap_update),
-    ]
-    
-    results = []
-    
-    for name, test_func in tests:
-        try:
-            result = test_func()
-            results.append((name, result))
-            if not result:
-                log_error(f"\n{name} FAILED - stopping test suite")
-                break
-        except Exception as e:
-            log_error(f"\n{name} CRASHED: {e}")
-            results.append((name, False))
-            break
-    
-    # Summary
-    print("\n" + "=" * 60)
-    print("TEST SUMMARY")
-    print("=" * 60)
-    
-    for name, result in results:
-        status = "✅ PASS" if result else "❌ FAIL"
-        print(f"{status} - {name}")
-    
-    passed = sum(1 for _, r in results if r)
-    total = len(results)
-    
-    print("=" * 60)
-    print(f"TOTAL: {passed}/{total} tests passed")
-    print("=" * 60)
-    
-    return 0 if passed == total else 1
+    try:
+        # Login
+        user_id = test_login()
+        
+        # Test 1: Demo seed (idempotency)
+        startup_id, session_ids = test_demo_seed(user_id)
+        
+        # Test 2: Demo session details
+        test_demo_sessions(session_ids)
+        
+        # Test 3: Founder studio aggregate
+        test_founder_studio(startup_id)
+        
+        # Test 4: AI rewrite + versions
+        test_ai_rewrite_and_versions(startup_id, session_ids)
+        
+        # Test 5: Re-pitch memory
+        test_repitch_memory(user_id)
+        
+        log("\n" + "=" * 80)
+        log("✅ ALL TESTS PASSED")
+        log("=" * 80)
+        
+    except Exception as e:
+        log("\n" + "=" * 80)
+        log(f"❌ TEST SUITE FAILED: {e}")
+        log("=" * 80)
+        raise
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

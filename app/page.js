@@ -14,7 +14,9 @@ import {
   ArrowRight, Mic, Send, ShieldAlert, TrendingDown, TrendingUp,
   Volume2, VolumeX, Loader2, Target, AlertTriangle, CheckCircle2, Sparkles,
   Brain, Scale, LineChart, LogOut, Plus, Play, ChevronRight, Clock, Building2, ChevronDown,
+  Wand2, FileText, Download, Pencil, History, ListChecks, BarChart3, PlayCircle, Check, X, ArrowLeft,
 } from 'lucide-react'
+import { LineChart as RLineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 
 const DIM_LABELS = {
   problem: 'Problem Severity', market: 'Market Attractiveness', founder: 'Founder Credibility',
@@ -109,27 +111,40 @@ export default function App() {
   const login = (u) => { localStorage.setItem('ec_user', JSON.stringify(u)); setUser(u); go('dashboard') }
   const logout = () => { localStorage.removeItem('ec_user'); setUser(null); go('landing') }
 
+  const enterDemo = async () => {
+    try {
+      const u = user || await api('/auth/login', { method: 'POST', body: { email: 'test@example.com', password: 'password123' } })
+      localStorage.setItem('ec_user', JSON.stringify(u)); setUser(u)
+      const d = await api('/demo/seed', { method: 'POST', body: { user_id: u.id } })
+      go('demo-pitch', { sessionId: d.session_ids[0], startupId: d.startup.id })
+    } catch (e) { toast.error('Could not start demo') }
+  }
+
   if (!booted) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
 
-  const guarded = ['dashboard', 'startup-new', 'panels', 'pitch', 'debrief']
+  const guarded = ['dashboard', 'startup-new', 'panels', 'pitch', 'debrief', 'rewrite', 'editor', 'studio', 'demo-pitch']
   if (guarded.includes(route.name) && !user) return <LoginView onLogin={login} go={go} />
 
   return (
     <>
       <Toaster theme="dark" position="top-center" richColors />
-      {route.name === 'landing' && <LandingView go={go} />}
+      {route.name === 'landing' && <LandingView go={go} enterDemo={enterDemo} />}
       {route.name === 'login' && <LoginView onLogin={login} go={go} />}
-      {route.name === 'dashboard' && <DashboardView user={user} go={go} logout={logout} />}
+      {route.name === 'dashboard' && <DashboardView user={user} go={go} logout={logout} enterDemo={enterDemo} />}
       {route.name === 'startup-new' && <StartupNewView user={user} go={go} />}
       {route.name === 'panels' && <PanelsView user={user} go={go} startup={route.params.startup} />}
       {route.name === 'pitch' && <PitchRoomView user={user} go={go} sessionId={route.params.sessionId} />}
       {route.name === 'debrief' && <DebriefView user={user} go={go} sessionId={route.params.sessionId} />}
+      {route.name === 'rewrite' && <RewriteView user={user} go={go} sessionId={route.params.sessionId} />}
+      {route.name === 'editor' && <EditorView user={user} go={go} versionId={route.params.versionId} />}
+      {route.name === 'studio' && <StudioView user={user} go={go} startupId={route.params.startupId} />}
+      {route.name === 'demo-pitch' && <DemoPitchView user={user} go={go} sessionId={route.params.sessionId} />}
     </>
   )
 }
 
 // ================================================================== LANDING
-function LandingView({ go }) {
+function LandingView({ go, enterDemo }) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <nav className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b border-border">
@@ -171,6 +186,9 @@ function LandingView({ go }) {
                 See how it works
               </Button>
             </div>
+            <button onClick={enterDemo} className="mt-5 inline-flex items-center gap-2 text-[14px] text-brand hover:underline">
+              <PlayCircle className="w-4 h-4" /> Watch the FlowPay demo — zero typing
+            </button>
             <p className="mt-7 text-[13px] text-muted-foreground/70">AI Simulation. Not affiliated with any real investor, firm or program.</p>
           </div>
           <div className="relative"><PitchPreview /></div>
@@ -341,7 +359,7 @@ function Shell({ children, go, logout }) {
 }
 
 // ================================================================== DASHBOARD
-function DashboardView({ user, go, logout }) {
+function DashboardView({ user, go, logout, enterDemo }) {
   const [startups, setStartups] = useState(null)
   const [sessions, setSessions] = useState({})
 
@@ -361,7 +379,10 @@ function DashboardView({ user, go, logout }) {
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">Founder Studio</h1>
           <p className="text-muted-foreground mt-1">Your startups and their pitch trajectory.</p>
         </div>
-        <Button onClick={() => go('startup-new')} className="rounded-lg"><Plus className="w-4 h-4 mr-1" /> New startup</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={enterDemo} className="rounded-lg border-border bg-transparent"><PlayCircle className="w-4 h-4 mr-1" /> Watch demo</Button>
+          <Button onClick={() => go('startup-new')} className="rounded-lg"><Plus className="w-4 h-4 mr-1" /> New startup</Button>
+        </div>
       </div>
 
       {startups === null && <div className="grid place-items-center py-20"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>}
@@ -399,6 +420,7 @@ function DashboardView({ user, go, logout }) {
               </div>
               <div className="flex gap-2 mt-5">
                 <Button size="sm" onClick={() => go('panels', { startup: s })} className="rounded-lg">{sess.length ? 'Re-pitch' : 'Pitch now'} <ArrowRight className="w-4 h-4 ml-1" /></Button>
+                <Button size="sm" variant="outline" onClick={() => go('studio', { startupId: s.id })} className="rounded-lg border-border">Studio</Button>
                 {latest && <Button size="sm" variant="outline" onClick={() => go('debrief', { sessionId: latest.id })} className="rounded-lg border-border">Latest debrief</Button>}
               </div>
               {sess.length > 0 && (
@@ -813,9 +835,11 @@ function DebriefView({ user, go, sessionId }) {
           <div className="flex items-center gap-2 text-sm text-foreground/90"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Strongest: <span className="font-medium">{DIM_LABELS[v.strongest_dimension] || v.strongest_dimension}</span></div>
           <div className="flex items-center gap-2 text-sm text-foreground/90"><AlertTriangle className="w-4 h-4 text-red-400" /> Weakest: <span className="font-medium">{DIM_LABELS[v.weakest_dimension] || v.weakest_dimension}</span></div>
         </div>
-        <div className="relative flex gap-2 mt-5">
-          <Button className="rounded-lg" onClick={() => go('panels', { startup: session.startup })}>Re-pitch <ArrowRight className="w-4 h-4 ml-1" /></Button>
-          <Button variant="outline" className="rounded-lg border-border bg-transparent" onClick={() => go('dashboard')}>Back to Studio</Button>
+        <div className="relative flex flex-wrap gap-2 mt-5">
+          <Button className="rounded-lg" onClick={() => go('rewrite', { sessionId })}><Wand2 className="w-4 h-4 mr-1" /> Rewrite with AI</Button>
+          <Button variant="outline" className="rounded-lg border-border bg-transparent" onClick={() => go('panels', { startup: session.startup })}>Re-pitch <ArrowRight className="w-4 h-4 ml-1" /></Button>
+          <Button variant="outline" className="rounded-lg border-border bg-transparent" onClick={() => go('studio', { startupId: session.startup_id })}>Enter Studio</Button>
+          <Button variant="ghost" className="rounded-lg" onClick={() => go('dashboard')}>Back</Button>
         </div>
       </div>
 
@@ -889,5 +913,429 @@ function DebriefView({ user, go, sessionId }) {
         </div>
       )}
     </Shell>
+  )
+}
+
+// ================================================================== REWRITE
+const PITCH_SECTION_LABELS = {
+  opening: 'Opening', problem: 'Problem', customer: 'Customer', solution: 'Solution', market: 'Market',
+  traction: 'Traction', business_model: 'Business Model', differentiation: 'Differentiation', moat: 'Moat',
+  gtm: 'Go-To-Market', team: 'Team', ask: 'The Ask', closing: 'Closing',
+}
+const PITCH_SECTION_ORDER = ['opening', 'problem', 'customer', 'solution', 'market', 'traction', 'business_model', 'differentiation', 'moat', 'gtm', 'team', 'ask', 'closing']
+const LENGTHS = [['60s', '60 sec'], ['90s', '90 sec'], ['2min', '2 min'], ['5min', '5 min']]
+
+function RewriteView({ user, go, sessionId }) {
+  const [session, setSession] = useState(null)
+  const [selected, setSelected] = useState({})
+  const [length, setLength] = useState('90s')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api('/sessions/' + sessionId).then((s) => {
+      setSession(s)
+      const pre = {}; (s.gaps || []).forEach((g) => { if (g.severity === 'P0') pre[g.id] = true })
+      setSelected(pre)
+    }).catch(() => { toast.error('Could not load session'); go('dashboard') })
+  }, [sessionId])
+
+  const generate = async () => {
+    setBusy(true)
+    try {
+      const gap_ids = Object.keys(selected).filter((k) => selected[k])
+      const v = await api('/rewrite', { method: 'POST', body: { session_id: sessionId, gap_ids, length } })
+      toast.success('Rewrite ready.')
+      go('editor', { versionId: v.id })
+    } catch (e) { toast.error('Generating your rewrite failed. Try again.') } finally { setBusy(false) }
+  }
+
+  if (!session) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
+  const gaps = session.gaps || []
+
+  return (
+    <Shell go={go} logout={() => go('landing')}>
+      <div className="max-w-2xl mx-auto">
+        <button onClick={() => go('debrief', { sessionId })} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 mb-4"><ArrowLeft className="w-4 h-4" /> Back to debrief</button>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground flex items-center gap-2"><Wand2 className="w-5 h-5 text-brand" /> Rewrite with AI</h1>
+        <p className="text-sm text-muted-foreground mt-1">Pick the gaps to address. The rewrite is evidence-honest — it never invents numbers and flags anything unproven.</p>
+
+        <div className="rounded-2xl border border-border bg-card p-5 mt-6">
+          <div className="text-sm font-medium text-foreground mb-3">Gaps to address</div>
+          <div className="space-y-2">
+            {gaps.length === 0 && <p className="text-sm text-muted-foreground">No gaps recorded — a general rewrite will be produced.</p>}
+            {gaps.map((g) => (
+              <label key={g.id} className="flex items-start gap-3 p-3 rounded-xl bg-secondary border border-border cursor-pointer">
+                <input type="checkbox" checked={!!selected[g.id]} onChange={(e) => setSelected((s) => ({ ...s, [g.id]: e.target.checked }))} className="mt-1 accent-emerald-500" />
+                <div>
+                  <Badge variant="outline" className={SEV_COLOR[g.severity] + ' mb-1'}>{g.severity} · {g.category}</Badge>
+                  <div className="text-sm text-foreground/90">{g.why_it_matters}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-5 mt-4">
+          <div className="text-sm font-medium text-foreground mb-3">Pitch length</div>
+          <div className="flex gap-2">
+            {LENGTHS.map(([k, l]) => (
+              <Button key={k} size="sm" variant={length === k ? 'default' : 'outline'} className={`rounded-lg ${length === k ? '' : 'border-border bg-transparent'}`} onClick={() => setLength(k)}>{l}</Button>
+            ))}
+          </div>
+        </div>
+
+        <Button onClick={generate} disabled={busy} className="w-full mt-6 h-11 rounded-lg">
+          {busy ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Generating your rewrite...</> : <>Generate rewrite <ArrowRight className="w-4 h-4 ml-1" /></>}
+        </Button>
+      </div>
+    </Shell>
+  )
+}
+
+// ================================================================== EDITOR
+function EditorView({ user, go, versionId }) {
+  const [version, setVersion] = useState(null)
+  const [sections, setSections] = useState({})
+  const [title, setTitle] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api('/versions/' + versionId).then((v) => { setVersion(v); setSections(v.sections || {}); setTitle(v.title || '') }).catch(() => { toast.error('Could not load version'); go('dashboard') })
+  }, [versionId])
+
+  const save = async () => {
+    setSaving(true)
+    try { await api('/versions/' + versionId, { method: 'PUT', body: { sections, title } }); toast.success('Version saved.') }
+    catch (e) { toast.error('Save failed') } finally { setSaving(false) }
+  }
+
+  const download = (blob, filename) => {
+    const url = URL.createObjectURL(blob); const a = document.createElement('a')
+    a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url)
+  }
+
+  const exportPDF = async () => {
+    try {
+      const { jsPDF } = await import('jspdf')
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+      const W = doc.internal.pageSize.getWidth(); const M = 48; let y = 60
+      doc.setFontSize(20); doc.setTextColor(20); doc.text('EchoClash — Pitch Document', M, y); y += 22
+      doc.setFontSize(12); doc.setTextColor(120); doc.text(title || 'Pitch', M, y); y += 24
+      doc.setTextColor(40)
+      PITCH_SECTION_ORDER.forEach((k) => {
+        const body = (sections[k] || '').trim(); if (!body) return
+        if (y > 760) { doc.addPage(); y = 60 }
+        doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text(PITCH_SECTION_LABELS[k], M, y); y += 16
+        doc.setFontSize(11); doc.setFont(undefined, 'normal')
+        const lines = doc.splitTextToSize(body, W - M * 2)
+        lines.forEach((ln) => { if (y > 780) { doc.addPage(); y = 60 } doc.text(ln, M, y); y += 15 })
+        y += 12
+      })
+      doc.setFontSize(9); doc.setTextColor(150); doc.text('Generated by EchoClash · AI Simulation', M, 812)
+      download(doc.output('blob'), `${(title || 'pitch').replace(/\s+/g, '_')}.pdf`)
+      api('/versions/' + versionId, { method: 'PUT', body: { sections, title } }).catch(() => {})
+    } catch (e) { toast.error('PDF export failed') }
+  }
+
+  const exportDOCX = async () => {
+    try {
+      const docx = await import('docx')
+      const { Document, Packer, Paragraph, HeadingLevel, TextRun } = docx
+      const children = [
+        new Paragraph({ text: 'EchoClash — Pitch Document', heading: HeadingLevel.TITLE }),
+        new Paragraph({ children: [new TextRun({ text: title || 'Pitch', italics: true, color: '666666' })] }),
+        new Paragraph({ text: '' }),
+      ]
+      PITCH_SECTION_ORDER.forEach((k) => {
+        const body = (sections[k] || '').trim(); if (!body) return
+        children.push(new Paragraph({ text: PITCH_SECTION_LABELS[k], heading: HeadingLevel.HEADING_2 }))
+        children.push(new Paragraph({ children: [new TextRun(body)] }))
+        children.push(new Paragraph({ text: '' }))
+      })
+      const doc = new Document({ sections: [{ children }] })
+      const blob = await Packer.toBlob(doc)
+      download(blob, `${(title || 'pitch').replace(/\s+/g, '_')}.docx`)
+    } catch (e) { toast.error('DOCX export failed') }
+  }
+
+  if (!version) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
+
+  return (
+    <Shell go={go} logout={() => go('landing')}>
+      <div className="max-w-3xl mx-auto">
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={() => go('debrief', { sessionId: version.session_id })} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Back</button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="rounded-lg border-border bg-transparent" onClick={save} disabled={saving}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save version'}</Button>
+            <Button size="sm" variant="outline" className="rounded-lg border-border bg-transparent" onClick={exportPDF}><FileText className="w-4 h-4 mr-1" /> PDF</Button>
+            <Button size="sm" variant="outline" className="rounded-lg border-border bg-transparent" onClick={exportDOCX}><Download className="w-4 h-4 mr-1" /> DOCX</Button>
+          </div>
+        </div>
+
+        <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full bg-transparent text-2xl font-semibold tracking-tight text-foreground outline-none border-b border-transparent focus:border-border pb-1" />
+        <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground"><Pencil className="w-3 h-3" /> You are the final author — edit any section.</div>
+
+        {version.flagged?.length > 0 && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 mt-4">
+            <div className="text-sm font-medium text-amber-300 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Verify before you pitch</div>
+            <ul className="mt-2 space-y-1 text-xs text-amber-200/80 list-disc pl-4">{version.flagged.map((f, i) => <li key={i}>{f.text} — <span className="opacity-70">{f.reason}</span></li>)}</ul>
+          </div>
+        )}
+
+        <div className="space-y-4 mt-6">
+          {PITCH_SECTION_ORDER.map((k) => (
+            <div key={k} className="rounded-2xl border border-border bg-card p-4">
+              <div className="text-xs uppercase tracking-wider text-brand font-medium mb-2">{PITCH_SECTION_LABELS[k]}</div>
+              <Textarea value={sections[k] || ''} onChange={(e) => setSections((s) => ({ ...s, [k]: e.target.value }))} className="bg-secondary border-border resize-none" rows={Math.max(2, Math.ceil((sections[k] || '').length / 80))} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </Shell>
+  )
+}
+
+// ================================================================== STUDIO
+function StudioView({ user, go, startupId }) {
+  const [data, setData] = useState(null)
+  const [tab, setTab] = useState('overview')
+
+  useEffect(() => { api('/studio?startup_id=' + startupId).then(setData).catch(() => toast.error('Could not load studio')) }, [startupId])
+
+  if (!data) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
+  const s = data.startup || {}
+  const ended = data.sessions.filter((x) => x.verdict)
+  const latest = ended[ended.length - 1]
+  const openGaps = data.gaps.filter((g) => g.status !== 'RESOLVED')
+  const p0 = openGaps.filter((g) => g.severity === 'P0')
+  const chartData = data.score_history.map((h) => ({ round: 'R' + h.round, score: h.score }))
+  const first = data.score_history[0]; const last = data.score_history[data.score_history.length - 1]
+
+  const TABS = [['overview', 'Overview', Building2], ['history', 'Versions', History], ['claims', 'Claims', ListChecks], ['gaps', 'Gaps', Target], ['scores', 'Scores', BarChart3]]
+
+  return (
+    <Shell go={go} logout={() => go('landing')}>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <div className="text-xs text-muted-foreground/70">{s.industry} · {s.stage} {s.is_demo && <span className="ml-2 text-brand">DEMO DATA</span>}</div>
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">{s.name}</h1>
+          <p className="text-muted-foreground mt-1 max-w-2xl">{s.one_liner}</p>
+        </div>
+        <Button onClick={() => go('panels', { startup: s })} className="rounded-lg">Re-pitch <ArrowRight className="w-4 h-4 ml-1" /></Button>
+      </div>
+
+      <div className="flex gap-2 mb-6 flex-wrap">
+        {TABS.map(([k, l, I]) => (
+          <Button key={k} size="sm" variant={tab === k ? 'default' : 'outline'} className={`rounded-lg ${tab === k ? '' : 'border-border bg-transparent'}`} onClick={() => setTab(k)}><I className="w-4 h-4 mr-1" /> {l}</Button>
+        ))}
+      </div>
+
+      {tab === 'overview' && (
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs text-muted-foreground">Latest readiness</div><div className="text-3xl font-semibold text-foreground mt-1">{latest?.score ?? '—'}</div>{latest && <Badge variant="outline" className={'mt-2 ' + (VERDICT_COLOR[latest.verdict] || '')}>{latest.verdict}</Badge>}</div>
+          <div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs text-muted-foreground">Open critical gaps</div><div className="text-3xl font-semibold text-foreground mt-1">{p0.length}<span className="text-base text-muted-foreground"> P0</span></div><div className="text-xs text-muted-foreground mt-2">{openGaps.length} open in total</div></div>
+          <div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs text-muted-foreground">Pitch rounds</div><div className="text-3xl font-semibold text-foreground mt-1">{data.sessions.length}</div><div className="text-xs text-muted-foreground mt-2">{data.versions.length} saved rewrites</div></div>
+          <div className="md:col-span-3 rounded-2xl border border-border bg-card p-5">
+            <div className="text-sm font-medium text-foreground mb-3">Recent sessions</div>
+            <div className="space-y-2">
+              {data.sessions.slice().reverse().map((x) => (
+                <button key={x.id} onClick={() => x.verdict ? go('debrief', { sessionId: x.id }) : go('pitch', { sessionId: x.id })} className="w-full flex items-center justify-between p-3 rounded-xl bg-secondary border border-border hover:border-white/20 text-left">
+                  <span className="text-sm text-foreground">Round {x.round_number} · {x.panel_name} {x.is_demo && <span className="text-brand text-xs ml-1">DEMO</span>}</span>
+                  <span className="text-xs text-muted-foreground">{x.verdict ? `${x.verdict.verdict} · ${x.verdict.final_score}` : x.status}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'history' && (
+        <div className="space-y-3">
+          {data.versions.length === 0 && <p className="text-sm text-muted-foreground">No rewrites yet. Open a debrief and click "Rewrite with AI".</p>}
+          {data.versions.map((v) => (
+            <div key={v.id} className="rounded-2xl border border-border bg-card p-4 flex items-center justify-between">
+              <div><div className="text-sm font-medium text-foreground">{v.title}</div><div className="text-xs text-muted-foreground mt-0.5">{v.length} · {new Date(v.created_at).toLocaleString()}</div></div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="rounded-lg border-border bg-transparent" onClick={() => go('editor', { versionId: v.id })}><Pencil className="w-4 h-4 mr-1" /> Edit</Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'claims' && (
+        <div className="rounded-2xl border border-border bg-card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-muted-foreground border-b border-border"><th className="p-3 font-medium">Claim</th><th className="p-3 font-medium">Category</th><th className="p-3 font-medium">Evidence</th><th className="p-3 font-medium">Round</th></tr></thead>
+            <tbody>
+              {data.claims.length === 0 && <tr><td colSpan={4} className="p-4 text-muted-foreground">No claims captured yet.</td></tr>}
+              {data.claims.map((c, i) => (
+                <tr key={i} className="border-b border-border/60">
+                  <td className="p-3 text-foreground/90">{c.text}{c.numeric_value != null && <span className="text-muted-foreground"> ({c.numeric_value}{c.unit})</span>}</td>
+                  <td className="p-3 text-muted-foreground">{c.category}</td>
+                  <td className="p-3"><span className={`text-[11px] rounded-full px-2 py-0.5 border ${c.evidence_status === 'CONTRADICTED' ? 'border-red-500/30 text-red-300 bg-red-500/10' : c.evidence_status === 'SUPPORTED' ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10' : 'border-border text-muted-foreground'}`}>{c.evidence_status}</span></td>
+                  <td className="p-3 text-muted-foreground">R{c.round}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === 'gaps' && (
+        <div className="space-y-3">
+          {data.gaps.length === 0 && <p className="text-sm text-muted-foreground">No gaps recorded yet.</p>}
+          {['P0', 'P1', 'P2'].map((sev) => data.gaps.filter((g) => g.severity === sev).map((g, i) => (
+            <div key={sev + i} className={`rounded-2xl border bg-card p-4 ${g.status === 'RESOLVED' ? 'border-emerald-500/30 opacity-70' : 'border-border'}`}>
+              <div className="flex items-center justify-between">
+                <Badge variant="outline" className={SEV_COLOR[g.severity]}>{g.severity} · {g.category} · R{g.round}</Badge>
+                {g.status === 'RESOLVED' && <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Resolved</span>}
+              </div>
+              <p className="text-sm mt-2 text-foreground/90">{g.why_it_matters}</p>
+              <div className="mt-1 text-xs text-muted-foreground"><span className="text-brand font-medium">Action:</span> {g.recommended_action}</div>
+            </div>
+          )))}
+        </div>
+      )}
+
+      {tab === 'scores' && (
+        <div className="space-y-6">
+          {data.score_history.length === 0 && <p className="text-sm text-muted-foreground">No scored sessions yet.</p>}
+          {data.score_history.length > 0 && (
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <div className="text-sm font-medium text-foreground mb-4">Readiness trajectory</div>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RLineChart data={chartData} margin={{ left: -20, right: 10, top: 10 }}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                    <XAxis dataKey="round" tick={{ fill: '#a1a1aa', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fill: '#a1a1aa', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ background: '#161618', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, color: '#fff' }} />
+                    <Line type="monotone" dataKey="score" stroke="#22c55e" strokeWidth={2.5} dot={{ r: 4, fill: '#22c55e' }} />
+                  </RLineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+          {first && last && first.round !== last.round && (
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <div className="text-sm font-medium text-foreground mb-3">Round {first.round} → Round {last.round} by dimension</div>
+              <div className="space-y-2">
+                {DIM_ORDER.map((k) => {
+                  const a = first.dims[k] ?? 0; const b = last.dims[k] ?? 0; const d = b - a
+                  return (
+                    <div key={k} className="flex items-center justify-between text-sm">
+                      <span className="text-foreground/90">{DIM_LABELS[k]}</span>
+                      <span className="flex items-center gap-3 tabular-nums"><span className="text-muted-foreground">{a} → {b}</span>
+                        <span className={`w-14 text-right ${d > 0 ? 'text-emerald-400' : d < 0 ? 'text-red-400' : 'text-muted-foreground'}`}>{d > 0 ? '↑ +' + d : d < 0 ? '↓ ' + d : '—'}</span>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Shell>
+  )
+}
+
+// ================================================================== DEMO PLAYBACK
+function DemoPitchView({ user, go, sessionId }) {
+  const [session, setSession] = useState(null)
+  const [visible, setVisible] = useState(0)
+  const [beliefs, setBeliefs] = useState({})
+  const [speaker, setSpeaker] = useState(null)
+  const scrollRef = useRef(null)
+
+  useEffect(() => {
+    api('/sessions/' + sessionId).then((s) => {
+      setSession(s)
+      const init = {}; (s.panel_personas || []).forEach((p) => { init[p.id] = {}; DIM_ORDER.forEach((k) => init[p.id][k] = 5) })
+      setBeliefs(init)
+    }).catch(() => { toast.error('Could not load demo'); go('dashboard') })
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!session) return
+    const full = session.transcript || []
+    if (visible >= full.length) return
+    const t = setTimeout(() => {
+      const msg = full[visible]
+      if (msg.role === 'persona') {
+        setSpeaker(msg.persona_id)
+        if (msg.beliefChanges?.length) {
+          setBeliefs((prev) => {
+            const next = JSON.parse(JSON.stringify(prev))
+            msg.beliefChanges.forEach((b) => { if (next[b.persona_id]) next[b.persona_id][b.dimension] = b.new })
+            return next
+          })
+        }
+        setTimeout(() => setSpeaker(null), 1400)
+      }
+      setVisible((v) => v + 1)
+    }, visible === 0 ? 500 : 2600)
+    return () => clearTimeout(t)
+  }, [session, visible])
+
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [visible])
+
+  if (!session) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
+  const personas = session.panel_personas || []
+  const full = session.transcript || []
+  const done = visible >= full.length
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <div className="bg-background/85 backdrop-blur-md border-b border-border sticky top-0 z-40">
+        <div className="container flex items-center justify-between h-14">
+          <div className="flex items-center gap-4">
+            <button onClick={() => go('dashboard')}><Logo className="text-[15px]" /></button>
+            <span className="text-sm text-muted-foreground hidden md:block">{session.panel_name}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="border-brand/40 text-brand bg-brand/10 text-[10px]">DEMO · FlowPay</Badge>
+            <Button size="sm" onClick={() => go('debrief', { sessionId })} className="rounded-lg">{done ? 'See the debrief' : 'Skip to debrief'} <ArrowRight className="w-4 h-4 ml-1" /></Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="container py-4">
+        <div className="grid grid-cols-3 gap-3">
+          {personas.map((p) => {
+            const conf = avgConfidence(beliefs[p.id]); const isSpeaking = speaker === p.id
+            return (
+              <div key={p.id} className={`rounded-2xl p-3 bg-card border transition-all ${isSpeaking ? 'border-emerald-400/50 shadow-[0_0_0_3px_rgba(34,197,94,0.15)]' : 'border-border'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <img src={p.avatar_url} alt={p.name} className="w-11 h-11 rounded-full object-cover border border-border" />
+                    <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-card ${isSpeaking ? 'bg-brand animate-pulse' : 'bg-emerald-400'}`} />
+                  </div>
+                  <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate text-foreground">{p.name}</div><div className="text-[11px] text-muted-foreground truncate">{p.role}</div></div>
+                </div>
+                <div className="mt-2.5 flex items-center justify-between"><span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{isSpeaking ? 'speaking' : 'listening'}</span><motion.span key={conf} initial={{ scale: 1.3, color: '#34d399' }} animate={{ scale: 1, color: '#fafafa' }} className="text-sm font-bold tabular-nums">{conf}</motion.span></div>
+                <Progress value={conf} className="h-1.5 mt-1" />
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto container pb-6">
+        <div className="space-y-4 max-w-4xl mx-auto">
+          {full.slice(0, visible).map((m) => <MessageBubble key={m.id} m={m} personas={personas} />)}
+          {!done && <div className="flex items-center gap-3 text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin text-brand" /><span className="text-sm">The panel is deliberating...</span></div>}
+          {done && (
+            <div className="text-center py-8">
+              <CheckCircle2 className="w-8 h-8 text-brand mx-auto mb-3" />
+              <h3 className="text-lg font-semibold text-foreground">Pitch complete.</h3>
+              <p className="text-muted-foreground mt-1 text-sm">Now see exactly where FlowPay breaks.</p>
+              <Button className="mt-4 rounded-lg" onClick={() => go('debrief', { sessionId })}>Open the debrief <ArrowRight className="w-4 h-4 ml-1" /></Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

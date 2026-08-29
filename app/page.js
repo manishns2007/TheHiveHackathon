@@ -15,8 +15,10 @@ import {
   Volume2, VolumeX, Loader2, Target, AlertTriangle, CheckCircle2, Sparkles,
   Brain, Scale, LineChart, LogOut, Plus, Play, ChevronRight, Clock, Building2, ChevronDown,
   Wand2, FileText, Download, Pencil, History, ListChecks, BarChart3, PlayCircle, Check, X, ArrowLeft,
+  Share2, Copy, GitCompare, User, Eye, Quote,
 } from 'lucide-react'
 import { LineChart as RLineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const DIM_LABELS = {
   problem: 'Problem Severity', market: 'Market Attractiveness', founder: 'Founder Credibility',
@@ -580,12 +582,14 @@ function PitchRoomView({ user, go, sessionId }) {
   const [micSupported, setMicSupported] = useState(true)
   const [elapsed, setElapsed] = useState(0)
   const [ending, setEnding] = useState(false)
+  const [dp, setDp] = useState(null)
+  const [beliefHistory, setBeliefHistory] = useState([])
   const scrollRef = useRef(null)
   const recogRef = useRef(null)
 
   useEffect(() => {
     api('/sessions/' + sessionId).then((s) => {
-      setSession(s); setPersonas(s.panel_personas || []); setBeliefs(s.beliefs || {}); setTranscript(s.transcript || [])
+      setSession(s); setPersonas(s.panel_personas || []); setBeliefs(s.beliefs || {}); setTranscript(s.transcript || []); setBeliefHistory(s.belief_history || [])
       if (s.verdict) go('debrief', { sessionId })
     }).catch(() => { toast.error('Could not load session'); go('dashboard') })
   }, [sessionId])
@@ -624,6 +628,7 @@ function PitchRoomView({ user, go, sessionId }) {
     try {
       const res = await api('/pitch/turn', { method: 'POST', body: { session_id: sessionId, message: msg } })
       setBeliefs(res.beliefs); setSpeaker(res.persona_message.persona_id)
+      setBeliefHistory((h) => [...h, ...(res.belief_changes || [])])
       setTranscript((t) => [...t, res.persona_message])
       if (res.contradictions?.length) toast.error(`${res.contradictions.length} contradiction${res.contradictions.length > 1 ? 's' : ''} detected`)
       speak(res.persona_message.content)
@@ -665,7 +670,7 @@ function PitchRoomView({ user, go, sessionId }) {
             const conf = avgConfidence(beliefs[p.id])
             const isSpeaking = speaker === p.id
             return (
-              <div key={p.id} className={`rounded-2xl p-3 bg-card border transition-all ${isSpeaking ? 'border-emerald-400/50 shadow-[0_0_0_3px_rgba(34,197,94,0.15)]' : 'border-border'}`}>
+              <div key={p.id} onClick={() => setDp(p)} className={`rounded-2xl p-3 bg-card border transition-all cursor-pointer hover:border-white/20 ${isSpeaking ? 'border-emerald-400/50 shadow-[0_0_0_3px_rgba(34,197,94,0.15)]' : 'border-border'}`}>
                 <div className="flex items-center gap-3">
                   <div className="relative">
                     <img src={p.avatar_url} alt={p.name} className="w-11 h-11 rounded-full object-cover border border-border" />
@@ -686,6 +691,8 @@ function PitchRoomView({ user, go, sessionId }) {
           })}
         </div>
       </div>
+
+      <PersonaDialog persona={dp} beliefs={dp ? beliefs[dp.id] : null} history={beliefHistory} open={!!dp} onOpenChange={(o) => !o && setDp(null)} />
 
       {/* conversation */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto container pb-4">
@@ -784,6 +791,7 @@ function MessageBubble({ m, personas }) {
 function DebriefView({ user, go, sessionId }) {
   const [session, setSession] = useState(null)
   const [tab, setTab] = useState('analysis')
+  const [dp, setDp] = useState(null)
 
   const load = () => api('/sessions/' + sessionId).then(setSession).catch(() => toast.error('Could not load debrief'))
   useEffect(() => { load() }, [sessionId])
@@ -837,11 +845,26 @@ function DebriefView({ user, go, sessionId }) {
         </div>
         <div className="relative flex flex-wrap gap-2 mt-5">
           <Button className="rounded-lg" onClick={() => go('rewrite', { sessionId })}><Wand2 className="w-4 h-4 mr-1" /> Rewrite with AI</Button>
+          <Button variant="outline" className="rounded-lg border-border bg-transparent" onClick={() => shareVerdictCard(session.startup?.name, v)}><Share2 className="w-4 h-4 mr-1" /> Share card</Button>
           <Button variant="outline" className="rounded-lg border-border bg-transparent" onClick={() => go('panels', { startup: session.startup })}>Re-pitch <ArrowRight className="w-4 h-4 ml-1" /></Button>
           <Button variant="outline" className="rounded-lg border-border bg-transparent" onClick={() => go('studio', { startupId: session.startup_id })}>Enter Studio</Button>
           <Button variant="ghost" className="rounded-lg" onClick={() => go('dashboard')}>Back</Button>
         </div>
       </div>
+
+      {(session.panel_personas || []).length > 0 && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-xs text-muted-foreground mr-1">The panel — tap to inspect:</span>
+          {session.panel_personas.map((p) => (
+            <button key={p.id} onClick={() => setDp(p)} className="flex items-center gap-2 rounded-full border border-border bg-card pl-1 pr-3 py-1 hover:border-white/20 transition-colors">
+              <img src={p.avatar_url} alt={p.name} className="w-6 h-6 rounded-full object-cover" />
+              <span className="text-xs text-foreground">{p.name}</span>
+              <Eye className="w-3 h-3 text-muted-foreground" />
+            </button>
+          ))}
+        </div>
+      )}
+      <PersonaDialog persona={dp} beliefs={dp ? session.beliefs?.[dp.id] : null} history={session.belief_history} open={!!dp} onOpenChange={(o) => !o && setDp(null)} />
 
       <div className="flex gap-2 mb-4">
         {[['analysis', 'Gaps & Scorecard'], ['deliberation', 'Panel Deliberation'], ['transcript', 'Transcript']].map(([k, l]) => (
@@ -1100,7 +1123,14 @@ function StudioView({ user, go, startupId }) {
   const [data, setData] = useState(null)
   const [tab, setTab] = useState('overview')
 
-  useEffect(() => { api('/studio?startup_id=' + startupId).then(setData).catch(() => toast.error('Could not load studio')) }, [startupId])
+  const load = useCallback(() => api('/studio?startup_id=' + startupId).then(setData).catch(() => toast.error('Could not load studio')), [startupId])
+  useEffect(() => { load() }, [load])
+
+  const toggleAction = async (g) => {
+    const next = g.status === 'RESOLVED' ? 'OPEN' : 'RESOLVED'
+    await api('/gaps/update', { method: 'POST', body: { session_id: g.session_id, gap_id: g.id, status: next } })
+    load()
+  }
 
   if (!data) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
   const s = data.startup || {}
@@ -1111,7 +1141,7 @@ function StudioView({ user, go, startupId }) {
   const chartData = data.score_history.map((h) => ({ round: 'R' + h.round, score: h.score }))
   const first = data.score_history[0]; const last = data.score_history[data.score_history.length - 1]
 
-  const TABS = [['overview', 'Overview', Building2], ['history', 'Versions', History], ['claims', 'Claims', ListChecks], ['gaps', 'Gaps', Target], ['scores', 'Scores', BarChart3]]
+  const TABS = [['overview', 'Overview', Building2], ['history', 'Versions', History], ['claims', 'Claims', ListChecks], ['gaps', 'Gaps', Target], ['actions', 'Actions', Check], ['scores', 'Scores', BarChart3], ['compare', 'Compare', GitCompare]]
 
   return (
     <Shell go={go} logout={() => go('landing')}>
@@ -1132,7 +1162,7 @@ function StudioView({ user, go, startupId }) {
 
       {tab === 'overview' && (
         <div className="grid md:grid-cols-3 gap-4">
-          <div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs text-muted-foreground">Latest readiness</div><div className="text-3xl font-semibold text-foreground mt-1">{latest?.score ?? '—'}</div>{latest && <Badge variant="outline" className={'mt-2 ' + (VERDICT_COLOR[latest.verdict] || '')}>{latest.verdict}</Badge>}</div>
+          <div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs text-muted-foreground">Latest readiness</div><div className="text-3xl font-semibold text-foreground mt-1">{latest?.verdict?.final_score ?? '—'}</div>{latest?.verdict && <Badge variant="outline" className={'mt-2 ' + (VERDICT_COLOR[latest.verdict.verdict] || '')}>{latest.verdict.verdict}</Badge>}</div>
           <div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs text-muted-foreground">Open critical gaps</div><div className="text-3xl font-semibold text-foreground mt-1">{p0.length}<span className="text-base text-muted-foreground"> P0</span></div><div className="text-xs text-muted-foreground mt-2">{openGaps.length} open in total</div></div>
           <div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs text-muted-foreground">Pitch rounds</div><div className="text-3xl font-semibold text-foreground mt-1">{data.sessions.length}</div><div className="text-xs text-muted-foreground mt-2">{data.versions.length} saved rewrites</div></div>
           <div className="md:col-span-3 rounded-2xl border border-border bg-card p-5">
@@ -1237,11 +1267,90 @@ function StudioView({ user, go, startupId }) {
           )}
         </div>
       )}
+
+      {tab === 'actions' && (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground mb-2">Every recommended action from every round, in one checklist. Tick them off as you fix them — this syncs with your gaps.</p>
+          {data.gaps.length === 0 && <p className="text-sm text-muted-foreground">No actions yet. Complete a pitch to generate them.</p>}
+          {data.gaps.map((g, i) => (
+            <label key={i} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${g.status === 'RESOLVED' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-border bg-card hover:border-white/20'}`}>
+              <input type="checkbox" checked={g.status === 'RESOLVED'} onChange={() => toggleAction(g)} className="mt-1 accent-emerald-500 w-4 h-4" />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="outline" className={SEV_COLOR[g.severity]}>{g.severity}</Badge>
+                  <span className="text-xs text-muted-foreground">{g.category} · R{g.round}</span>
+                </div>
+                <div className={`text-sm mt-1 ${g.status === 'RESOLVED' ? 'line-through text-muted-foreground' : 'text-foreground/90'}`}>{g.recommended_action}</div>
+                {g.required_evidence && g.status !== 'RESOLVED' && <div className="text-xs text-muted-foreground mt-0.5"><span className="text-amber-400">Evidence:</span> {g.required_evidence}</div>}
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
+
+      {tab === 'compare' && <CompareRounds sessions={ended} />}
     </Shell>
   )
 }
 
-// ================================================================== DEMO PLAYBACK
+// ================================================================== COMPARE ROUNDS
+function CompareRounds({ sessions }) {
+  const ordered = [...sessions].sort((a, b) => a.round_number - b.round_number)
+  const [aId, setAId] = useState(ordered[0]?.id)
+  const [bId, setBId] = useState(ordered[ordered.length - 1]?.id)
+  const [aDoc, setADoc] = useState(null)
+  const [bDoc, setBDoc] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!aId || !bId) return
+    setLoading(true)
+    Promise.all([api('/sessions/' + aId), api('/sessions/' + bId)])
+      .then(([a, b]) => { setADoc(a); setBDoc(b) })
+      .catch(() => toast.error('Could not load rounds'))
+      .finally(() => setLoading(false))
+  }, [aId, bId])
+
+  if (ordered.length < 2) return <p className="text-sm text-muted-foreground">You need at least two completed rounds to compare. Re-pitch this startup to unlock the side-by-side view.</p>
+
+  const Col = ({ doc }) => {
+    if (!doc) return <div className="grid place-items-center py-10"><Loader2 className="w-5 h-5 animate-spin text-brand" /></div>
+    const v = doc.verdict
+    return (
+      <div className="rounded-2xl border border-border bg-card overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center justify-between sticky top-0 bg-card">
+          <div><div className="text-sm font-semibold text-foreground">Round {doc.round_number}</div><div className="text-xs text-muted-foreground">{doc.panel_name}</div></div>
+          {v && <div className="text-right"><div className="text-2xl font-bold text-foreground">{v.final_score}</div><Badge variant="outline" className={'text-[10px] ' + (VERDICT_COLOR[v.verdict] || '')}>{v.verdict}</Badge></div>}
+        </div>
+        <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
+          {(doc.transcript || []).map((m) => <MessageBubble key={m.id} m={m} personas={doc.panel_personas || []} />)}
+        </div>
+      </div>
+    )
+  }
+
+  const scoreDelta = (aDoc?.verdict && bDoc?.verdict) ? bDoc.verdict.final_score - aDoc.verdict.final_score : null
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <select value={aId} onChange={(e) => setAId(e.target.value)} className="bg-card border border-border rounded-lg px-3 py-1.5 text-sm text-foreground">
+          {ordered.map((s) => <option key={s.id} value={s.id}>Round {s.round_number} · {s.verdict?.final_score ?? '—'}</option>)}
+        </select>
+        <ArrowLeftRightIcon />
+        <select value={bId} onChange={(e) => setBId(e.target.value)} className="bg-card border border-border rounded-lg px-3 py-1.5 text-sm text-foreground">
+          {ordered.map((s) => <option key={s.id} value={s.id}>Round {s.round_number} · {s.verdict?.final_score ?? '—'}</option>)}
+        </select>
+        {scoreDelta != null && <span className={`text-sm font-medium ${scoreDelta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{scoreDelta >= 0 ? '↑ +' : '↓ '}{Math.abs(scoreDelta)} points</span>}
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        <Col doc={aDoc} /><Col doc={bDoc} />
+      </div>
+    </div>
+  )
+}
+
+function ArrowLeftRightIcon() { return <GitCompare className="w-4 h-4 text-muted-foreground" /> }
 function DemoPitchView({ user, go, sessionId }) {
   const [session, setSession] = useState(null)
   const [visible, setVisible] = useState(0)
@@ -1338,4 +1447,117 @@ function DemoPitchView({ user, go, sessionId }) {
       </div>
     </div>
   )
+}
+
+// ================================================================== PERSONA DEEP-DIVE
+function PersonaDialog({ persona, beliefs, history, open, onOpenChange }) {
+  if (!persona) return null
+  const dims = beliefs || {}
+  const moves = (history || []).filter((h) => h.persona_id === persona.id)
+  const conf = avgConfidence(dims)
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border text-foreground max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3">
+            <img src={persona.avatar_url} alt={persona.name} className="w-12 h-12 rounded-full object-cover border border-border" />
+            <div><div className="text-base">{persona.name}</div><div className="text-xs text-muted-foreground font-normal">{persona.role}</div></div>
+            <span className="ml-auto text-2xl font-bold tabular-nums">{conf}</span>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="rounded-xl bg-secondary border border-border p-3">
+            <div className="text-[11px] uppercase tracking-wider text-brand font-medium mb-1">Their lens</div>
+            <div className="text-sm text-foreground/90">Primary: <span className="font-medium">{DIM_LABELS[persona.primary_lens] || persona.primary_lens}</span> — {persona.lens_desc}</div>
+          </div>
+          <div className="rounded-xl bg-red-500/10 border border-red-500/25 p-3">
+            <div className="text-[11px] uppercase tracking-wider text-red-300 font-medium mb-1 flex items-center gap-1"><ShieldAlert className="w-3 h-3" /> What they distrust</div>
+            <div className="text-sm text-red-100/80">{persona.distrusts}</div>
+          </div>
+          <div>
+            <div className="text-sm font-medium text-foreground mb-2">Belief across dimensions</div>
+            <div className="space-y-2">
+              {DIM_ORDER.map((k) => (
+                <div key={k}>
+                  <div className="flex items-center justify-between text-xs text-foreground/90"><span>{DIM_LABELS[k]}</span><span className="tabular-nums">{dims[k] ?? 5}/10</span></div>
+                  <Progress value={(dims[k] ?? 5) * 10} className="h-1.5 mt-0.5" />
+                </div>
+              ))}
+            </div>
+          </div>
+          {moves.length > 0 && (
+            <div>
+              <div className="text-sm font-medium text-foreground mb-2">How their belief moved</div>
+              <div className="space-y-1.5">
+                {moves.map((m, i) => {
+                  const down = m.new < m.previous
+                  return (
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 border shrink-0 ${down ? 'border-red-500/30 text-red-300 bg-red-500/10' : 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10'}`}>
+                        {down ? <TrendingDown className="w-3 h-3" /> : <TrendingUp className="w-3 h-3" />} {DIM_LABELS[m.dimension] || m.dimension} {m.previous}→{m.new}
+                      </span>
+                      <span className="text-muted-foreground">{m.reason}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ================================================================== SHARE CARD
+function drawShareCard(startupName, v) {
+  const c = document.createElement('canvas'); c.width = 1200; c.height = 630
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#0a0a0b'; ctx.fillRect(0, 0, 1200, 630)
+  // top gradient bar
+  const g = ctx.createLinearGradient(0, 0, 1200, 0)
+  g.addColorStop(0, '#a3e635'); g.addColorStop(0.5, '#22c55e'); g.addColorStop(1, '#2dd4bf')
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 1200, 8)
+  // flowing lines
+  ctx.strokeStyle = g; ctx.globalAlpha = 0.18; ctx.lineWidth = 1.5
+  for (let i = 0; i < 16; i++) { ctx.beginPath(); ctx.moveTo(720, 120 + i * 26); ctx.bezierCurveTo(880, 60 + i * 24, 1040, 560 - i * 20, 1220, 200 + i * 22); ctx.stroke() }
+  ctx.globalAlpha = 1
+  // logo + label
+  ctx.fillStyle = '#fafafa'; ctx.font = '700 34px Inter, sans-serif'; ctx.fillText('ECHOCLASH', 64, 96)
+  ctx.fillStyle = '#a1a1aa'; ctx.font = '400 22px Inter, sans-serif'; ctx.fillText('AI Investment Committee — pitch debrief', 64, 132)
+  // startup
+  ctx.fillStyle = '#fafafa'; ctx.font = '600 56px Inter, sans-serif'; ctx.fillText(startupName || 'My Startup', 64, 240)
+  // score
+  ctx.fillStyle = '#22c55e'; ctx.font = '800 180px Inter, sans-serif'; ctx.fillText(String(v.final_score), 64, 430)
+  ctx.fillStyle = '#71717a'; ctx.font = '500 40px Inter, sans-serif'; ctx.fillText('/ 100', 64 + ctx.measureText(String(v.final_score)).width + 24, 430)
+  ctx.fillStyle = '#a1a1aa'; ctx.font = '400 26px Inter, sans-serif'; ctx.fillText('pitch readiness', 68, 470)
+  // verdict pill
+  const vt = v.verdict || ''; ctx.font = '600 30px Inter, sans-serif'
+  const pw = ctx.measureText(vt).width + 56
+  const isPass = vt === 'Pass'; const isGood = vt.includes('Interest') && !vt.includes('Conditional')
+  ctx.fillStyle = isPass ? 'rgba(239,68,68,0.15)' : isGood ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)'
+  ctx.strokeStyle = isPass ? '#ef4444' : isGood ? '#10b981' : '#f59e0b'
+  const px = 64, py = 520
+  ctx.beginPath(); ctx.roundRect(px, py, pw, 60, 30); ctx.fill(); ctx.stroke()
+  ctx.fillStyle = isPass ? '#fca5a5' : isGood ? '#6ee7b7' : '#fcd34d'; ctx.fillText(vt, px + 28, py + 40)
+  // strongest/weakest
+  ctx.fillStyle = '#a1a1aa'; ctx.font = '400 22px Inter, sans-serif'
+  ctx.fillText(`Strongest: ${DIM_LABELS[v.strongest_dimension] || v.strongest_dimension || '—'}   ·   Weakest: ${DIM_LABELS[v.weakest_dimension] || v.weakest_dimension || '—'}`, 64, 610)
+  return c
+}
+
+async function shareVerdictCard(startupName, v) {
+  try {
+    const canvas = drawShareCard(startupName, v)
+    canvas.toBlob(async (blob) => {
+      if (!blob) return
+      const file = new File([blob], 'echoclash-verdict.png', { type: 'image/png' })
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: 'My EchoClash verdict', text: `${startupName}: ${v.final_score}/100 — ${v.verdict}` }); return } catch (e) {}
+      }
+      const url = URL.createObjectURL(blob); const a = document.createElement('a')
+      a.href = url; a.download = 'echoclash-verdict.png'; a.click(); URL.revokeObjectURL(url)
+      toast.success('Verdict card downloaded.')
+    }, 'image/png')
+  } catch (e) { toast.error('Could not generate share card') }
 }

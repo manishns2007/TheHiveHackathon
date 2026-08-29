@@ -572,119 +572,143 @@ function PitchRoomView({ user, go, sessionId }) {
   const [session, setSession] = useState(null)
   const [personas, setPersonas] = useState([])
   const [beliefs, setBeliefs] = useState({})
+  const [beliefHistory, setBeliefHistory] = useState([])
   const [transcript, setTranscript] = useState([])
-  const [input, setInput] = useState('')
-  const [thinking, setThinking] = useState(false)
-  const [statusIdx, setStatusIdx] = useState(0)
+  const [phase, setPhase] = useState('idle') // idle | listening | processing | speaking
+  const [interim, setInterim] = useState('')
+  const [caption, setCaption] = useState(null)
   const [speaker, setSpeaker] = useState(null)
-  const [ttsOn, setTtsOn] = useState(false)
-  const [listening, setListening] = useState(false)
+  const [ttsOn, setTtsOn] = useState(true)
   const [micSupported, setMicSupported] = useState(true)
   const [elapsed, setElapsed] = useState(0)
   const [ending, setEnding] = useState(false)
   const [dp, setDp] = useState(null)
-  const [beliefHistory, setBeliefHistory] = useState([])
-  const scrollRef = useRef(null)
-  const recogRef = useRef(null)
+  const [showT, setShowT] = useState(false)
+  const [textMode, setTextMode] = useState(false)
+  const [textVal, setTextVal] = useState('')
+
+  const recogRef = useRef(null); const finalRef = useRef(''); const interimRef = useRef('')
+  const interruptedRef = useRef(false); const maxTimerRef = useRef(null); const sendingRef = useRef(false)
+  const sendFnRef = useRef(() => {}); const ttsOnRef = useRef(true)
+  useEffect(() => { ttsOnRef.current = ttsOn }, [ttsOn])
 
   useEffect(() => {
     api('/sessions/' + sessionId).then((s) => {
-      setSession(s); setPersonas(s.panel_personas || []); setBeliefs(s.beliefs || {}); setTranscript(s.transcript || []); setBeliefHistory(s.belief_history || [])
+      setSession(s); setPersonas(s.panel_personas || []); setBeliefs(s.beliefs || {}); setBeliefHistory(s.belief_history || []); setTranscript(s.transcript || [])
       if (s.verdict) go('debrief', { sessionId })
     }).catch(() => { toast.error('Could not load session'); go('dashboard') })
   }, [sessionId])
-
   useEffect(() => { const t = setInterval(() => setElapsed((e) => e + 1), 1000); return () => clearInterval(t) }, [])
-  useEffect(() => { if (thinking) { const t = setInterval(() => setStatusIdx((i) => (i + 1) % STATUS_MSGS.length), 1400); return () => clearInterval(t) } }, [thinking])
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [transcript, thinking])
+
+  const speak = (text, onDone) => {
+    if (ttsOnRef.current && typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel()
+      const u = new SpeechSynthesisUtterance(text); u.rate = 1.04; u.pitch = 0.96
+      u.onend = onDone; u.onerror = onDone; window.speechSynthesis.speak(u)
+    } else { setTimeout(onDone, Math.min(7000, 1400 + text.length * 32)) }
+  }
+
+  const finalize = async (interrupted) => {
+    if (sendingRef.current) return
+    const text = (finalRef.current || interimRef.current || '').trim()
+    finalRef.current = ''; interimRef.current = ''; setInterim('')
+    if (!text) { setPhase('idle'); return }
+    sendingRef.current = true; setPhase('processing')
+    setTranscript((t) => [...t, { id: 'f' + Date.now(), role: 'founder', content: text }])
+    setCaption({ who: 'founder', text })
+    try {
+      const msg = interrupted ? text + ' [The founder is still mid-sentence — cut in and interrupt them.]' : text
+      const res = await api('/pitch/turn', { method: 'POST', body: { session_id: sessionId, message: msg } })
+      const pm = res.persona_message
+      setBeliefs(res.beliefs); setBeliefHistory((h) => [...h, ...(res.belief_changes || [])]); setSpeaker(pm.persona_id)
+      setTranscript((t) => [...t, pm])
+      const avatar = pm.avatar_url || personas.find((p) => p.id === pm.persona_id)?.avatar_url
+      setCaption({ who: 'persona', name: pm.personaName, role: pm.personaRole, avatar, text: pm.content, question: pm.question, contradictions: pm.contradictions, beliefChanges: pm.beliefChanges, interrupted })
+      setPhase('speaking')
+      speak(pm.content + (pm.question?.text ? '. ' + pm.question.text : ''), () => { setSpeaker(null); setPhase('idle') })
+    } catch (e) { toast.error('The panel is experiencing a brief delay. Try again.'); setPhase('idle') }
+    finally { sendingRef.current = false }
+  }
+  sendFnRef.current = finalize
 
   useEffect(() => {
     const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
-    if (!SR) { setMicSupported(false); return }
+    if (!SR) { setMicSupported(false); setTextMode(true); return }
     const r = new SR(); r.continuous = false; r.interimResults = true; r.lang = 'en-IN'
-    r.onresult = (e) => { const txt = Array.from(e.results).map((x) => x[0].transcript).join(''); setInput(txt) }
-    r.onend = () => setListening(false); r.onerror = () => setListening(false)
+    r.onresult = (e) => {
+      let fin = '', intr = ''
+      for (let i = 0; i < e.results.length; i++) { const tr = e.results[i][0].transcript; if (e.results[i].isFinal) fin += tr; else intr += tr }
+      if (fin) finalRef.current += fin + ' '
+      interimRef.current = intr; setInterim((finalRef.current + intr).trim())
+      if ((finalRef.current + intr).trim().length > 240 && !interruptedRef.current) { interruptedRef.current = true; try { r.stop() } catch (er) {} }
+    }
+    r.onerror = () => {}
+    r.onend = () => { if (maxTimerRef.current) clearTimeout(maxTimerRef.current); sendFnRef.current(interruptedRef.current) }
     recogRef.current = r
+    return () => { try { r.abort() } catch (er) {} if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel() }
   }, [])
 
-  const toggleMic = () => {
-    if (!micSupported) return
-    if (listening) { recogRef.current?.stop(); setListening(false) }
-    else { try { recogRef.current?.start(); setListening(true) } catch (e) {} }
+  const startListening = () => {
+    if (!micSupported) { setTextMode(true); return }
+    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel()
+    finalRef.current = ''; interimRef.current = ''; interruptedRef.current = false; setInterim(''); setCaption(null); setPhase('listening')
+    try { recogRef.current.start() } catch (e) {}
+    maxTimerRef.current = setTimeout(() => { interruptedRef.current = true; try { recogRef.current.stop() } catch (er) {} }, 16000)
   }
-  const speak = (text) => {
-    if (!ttsOn || typeof window === 'undefined' || !window.speechSynthesis) return
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text); u.rate = 1.02; u.pitch = 0.95; window.speechSynthesis.speak(u)
-  }
-  const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+  const stopListening = () => { try { recogRef.current.stop() } catch (e) {} }
+  const skipSpeaking = () => { if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel(); setSpeaker(null); setPhase('idle') }
+  const sendText = () => { const v = textVal.trim(); if (!v) return; finalRef.current = v; setTextVal(''); finalize(false) }
 
-  const send = async () => {
-    const msg = input.trim()
-    if (!msg || thinking) return
-    setInput(''); if (listening) toggleMic()
-    setTranscript((t) => [...t, { id: 'f' + Date.now(), role: 'founder', content: msg }])
-    setThinking(true); setStatusIdx(0)
-    try {
-      const res = await api('/pitch/turn', { method: 'POST', body: { session_id: sessionId, message: msg } })
-      setBeliefs(res.beliefs); setSpeaker(res.persona_message.persona_id)
-      setBeliefHistory((h) => [...h, ...(res.belief_changes || [])])
-      setTranscript((t) => [...t, res.persona_message])
-      if (res.contradictions?.length) toast.error(`${res.contradictions.length} contradiction${res.contradictions.length > 1 ? 's' : ''} detected`)
-      speak(res.persona_message.content)
-      setTimeout(() => setSpeaker(null), 1200)
-    } catch (err) { toast.error('The panel is experiencing a brief delay. Please try again.') }
-    finally { setThinking(false) }
+  const micClick = () => {
+    if (phase === 'idle') startListening()
+    else if (phase === 'listening') stopListening()
+    else if (phase === 'speaking') skipSpeaking()
   }
 
   const endPitch = async () => {
-    if (transcript.length < 2) { toast.error('Say at least one thing before ending.'); return }
+    if (transcript.filter((m) => m.role === 'founder').length === 0) { toast.error('Give at least part of your pitch first.'); return }
+    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel()
     setEnding(true)
     try { await api('/pitch/end', { method: 'POST', body: { session_id: sessionId } }); go('debrief', { sessionId }) }
-    catch (err) { toast.error('Deliberation failed. Try again.'); setEnding(false) }
+    catch (e) { toast.error('Could not reach the panel. Try again.'); setEnding(false) }
   }
 
   if (!session) return <div className="min-h-screen grid place-items-center bg-background"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
+  const mmss = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col relative overflow-hidden">
+      <FlowLines className="absolute -top-20 right-0 w-[900px] h-[700px] opacity-[0.10] pointer-events-none" />
+      {/* top bar */}
       <div className="bg-background/85 backdrop-blur-md border-b border-border sticky top-0 z-40">
         <div className="container flex items-center justify-between h-14">
-          <div className="flex items-center gap-4">
-            <Logo className="text-[15px]" />
-            <Badge variant="outline" className="hidden sm:flex border-border text-muted-foreground gap-1"><Clock className="w-3 h-3" /> {fmtTime(elapsed)}</Badge>
-            <span className="text-sm text-muted-foreground hidden md:block">{session.panel_name}</span>
-          </div>
+          <div className="flex items-center gap-4"><button onClick={() => go('dashboard')}><Logo className="text-[15px]" /></button><span className="text-sm text-muted-foreground hidden md:block">{session.panel_name}</span></div>
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="border-emerald-500/30 text-emerald-300 bg-emerald-500/10 text-[10px]">AI SIMULATION</Badge>
-            <Button size="icon" variant="ghost" onClick={() => setTtsOn((v) => !v)} title="Toggle voice">{ttsOn ? <Volume2 className="w-4 h-4 text-brand" /> : <VolumeX className="w-4 h-4 text-muted-foreground" />}</Button>
-            <Button size="sm" variant="destructive" onClick={endPitch} disabled={ending}>{ending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'End pitch'}</Button>
+            <span className="text-xs tabular-nums text-muted-foreground flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {mmss}</span>
+            <Badge variant="outline" className="border-brand/40 text-brand bg-brand/10 text-[10px]">AI SIMULATION</Badge>
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setTtsOn((v) => !v)} title="Panel voice">{ttsOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-muted-foreground" />}</Button>
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setShowT((v) => !v)} title="Transcript"><FileText className={`w-4 h-4 ${showT ? 'text-brand' : ''}`} /></Button>
+            <Button size="sm" variant="destructive" className="rounded-lg" onClick={endPitch} disabled={ending}>{ending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'End pitch'}</Button>
           </div>
         </div>
       </div>
 
-      {/* personas */}
-      <div className="container py-4">
+      {/* personas stage */}
+      <div className="container py-4 relative z-10">
         <div className="grid grid-cols-3 gap-3">
           {personas.map((p) => {
-            const conf = avgConfidence(beliefs[p.id])
-            const isSpeaking = speaker === p.id
+            const conf = avgConfidence(beliefs[p.id]); const isSpeaking = speaker === p.id && phase === 'speaking'
             return (
               <div key={p.id} onClick={() => setDp(p)} className={`rounded-2xl p-3 bg-card border transition-all cursor-pointer hover:border-white/20 ${isSpeaking ? 'border-emerald-400/50 shadow-[0_0_0_3px_rgba(34,197,94,0.15)]' : 'border-border'}`}>
                 <div className="flex items-center gap-3">
                   <div className="relative">
                     <img src={p.avatar_url} alt={p.name} className="w-11 h-11 rounded-full object-cover border border-border" />
-                    <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-card ${isSpeaking ? 'bg-brand animate-pulse' : thinking ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+                    <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-card ${isSpeaking ? 'bg-brand animate-pulse' : 'bg-emerald-400'}`} />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold truncate text-foreground">{p.name}</div>
-                    <div className="text-[11px] text-muted-foreground truncate">{p.role}</div>
-                  </div>
+                  <div className="min-w-0 flex-1"><div className="text-sm font-semibold truncate text-foreground">{p.name}</div><div className="text-[11px] text-muted-foreground truncate">{p.role}</div></div>
+                  <Eye className="w-3.5 h-3.5 text-muted-foreground/50" />
                 </div>
-                <div className="mt-2.5 flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{isSpeaking ? 'speaking' : thinking ? 'thinking' : 'listening'}</span>
-                  <motion.span key={conf} initial={{ scale: 1.3, color: '#34d399' }} animate={{ scale: 1, color: '#fafafa' }} className="text-sm font-bold tabular-nums">{conf}</motion.span>
-                </div>
+                <div className="mt-2.5 flex items-center justify-between"><span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{isSpeaking ? 'speaking' : 'listening'}</span><motion.span key={conf} initial={{ scale: 1.3, color: '#34d399' }} animate={{ scale: 1, color: '#fafafa' }} className="text-sm font-bold tabular-nums">{conf}</motion.span></div>
                 <Progress value={conf} className="h-1.5 mt-1" />
               </div>
             )
@@ -692,45 +716,82 @@ function PitchRoomView({ user, go, sessionId }) {
         </div>
       </div>
 
-      <PersonaDialog persona={dp} beliefs={dp ? beliefs[dp.id] : null} history={beliefHistory} open={!!dp} onOpenChange={(o) => !o && setDp(null)} />
+      <PersonaDialog persona={dp} beliefs={dp ? beliefs[dp.id] : null} history={beliefHistory} quotes={dp ? transcript.filter((m) => m.persona_id === dp.id).map((m) => m.content) : []} startupId={session.startup_id} open={!!dp} onOpenChange={(o) => !o && setDp(null)} />
 
-      {/* conversation */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto container pb-4">
-        <div className="space-y-4 max-w-4xl mx-auto">
-          {transcript.length === 0 && (
-            <div className="text-center py-16">
-              <Sparkles className="w-8 h-8 text-brand mx-auto mb-3" />
-              <h3 className="text-lg font-semibold text-foreground">The panel is ready.</h3>
-              <p className="text-muted-foreground mt-1 text-sm">Open with your pitch. Be specific — they will check your numbers.</p>
+      {/* caption stage */}
+      <div className="flex-1 flex flex-col items-center justify-center container relative z-10 pb-40 pt-2">
+        <div className="w-full max-w-3xl min-h-[220px] flex items-center justify-center text-center">
+          {phase === 'processing' && (
+            <div className="flex flex-col items-center gap-3 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin text-brand" /><span className="text-sm">The panel is considering your words…</span></div>
+          )}
+          {phase === 'listening' && (
+            <div className="w-full">
+              <div className="flex items-center justify-center gap-1 h-10 mb-4">{[...Array(9)].map((_, i) => <motion.span key={i} className="w-1.5 rounded-full bg-brand" animate={{ height: [8, 26, 8] }} transition={{ duration: 0.7, repeat: Infinity, delay: i * 0.08 }} />)}</div>
+              <p className={`text-xl md:text-2xl leading-relaxed ${interim ? 'text-foreground' : 'text-muted-foreground/60'}`}>{interim || 'Listening… make your pitch.'}</p>
+              <p className="text-xs text-muted-foreground/60 mt-4">Pause when you finish a point — the panel replies. Ramble too long and they <span className="text-amber-400">cut in</span>.</p>
             </div>
           )}
-          {transcript.map((m) => <MessageBubble key={m.id} m={m} personas={personas} />)}
-          {thinking && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3 text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin text-brand" /><span className="text-sm">{STATUS_MSGS[statusIdx]}</span>
+          {(phase === 'idle' || phase === 'speaking') && caption && caption.who === 'persona' && (
+            <motion.div key={caption.text.slice(0, 12)} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="w-full">
+              <div className="flex items-center justify-center gap-3 mb-4">
+                {caption.avatar && <img src={caption.avatar} alt={caption.name} className="w-12 h-12 rounded-full object-cover border border-border" />}
+                <div className="text-left"><div className="text-sm font-semibold text-foreground flex items-center gap-2">{caption.name}{caption.interrupted && <Badge variant="outline" className="border-amber-500/40 text-amber-300 bg-amber-500/10 text-[10px]">interjects</Badge>}</div><div className="text-[11px] text-muted-foreground">{caption.role}</div></div>
+              </div>
+              <p className="text-xl md:text-2xl leading-relaxed text-foreground/95 font-medium">{caption.text}</p>
+              {caption.question?.text && <p className="text-lg text-brand mt-4 flex items-center justify-center gap-2"><Target className="w-4 h-4" /> {caption.question.text}</p>}
+              <div className="flex items-center justify-center gap-2 mt-5 flex-wrap">
+                {(caption.contradictions || []).map((c, i) => <span key={i} className="inline-flex items-center gap-1 text-xs rounded-full px-3 py-1 border border-red-500/40 text-red-300 bg-red-500/10"><ShieldAlert className="w-3 h-3" /> Contradiction · {c.severity}</span>)}
+                {(caption.beliefChanges || []).map((b, i) => { const down = b.new < b.previous; return <span key={i} className={`inline-flex items-center gap-1 text-xs rounded-full px-3 py-1 border ${down ? 'border-red-500/30 text-red-300 bg-red-500/10' : 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10'}`}>{down ? <TrendingDown className="w-3 h-3" /> : <TrendingUp className="w-3 h-3" />} {DIM_LABELS[b.dimension] || b.dimension} {b.previous}→{b.new}</span> })}
+              </div>
             </motion.div>
+          )}
+          {phase === 'idle' && (!caption || caption.who === 'founder') && (
+            <div className="text-center">
+              <Mic className="w-8 h-8 text-brand mx-auto mb-3" />
+              <p className="text-xl text-foreground font-medium">{caption?.who === 'founder' ? 'Heard you.' : 'The floor is yours.'}</p>
+              <p className="text-sm text-muted-foreground mt-1">Tap the mic and open your pitch. Speak naturally — like you're in the room.</p>
+            </div>
           )}
         </div>
       </div>
 
-      {/* input */}
-      <div className="bg-background/90 backdrop-blur-md border-t border-border sticky bottom-0">
-        <div className="container py-3 max-w-4xl mx-auto">
-          <div className="flex items-end gap-2">
-            {micSupported && (
-              <button onClick={toggleMic} className={`shrink-0 w-11 h-11 rounded-full grid place-items-center transition-all ${listening ? 'bg-brand mic-pulse' : 'bg-secondary hover:bg-accent'}`}>
-                <Mic className={`w-5 h-5 ${listening ? 'text-black' : 'text-muted-foreground'}`} />
+      {/* mic dock */}
+      <div className="fixed bottom-0 inset-x-0 z-30 bg-gradient-to-t from-background via-background/95 to-transparent pt-10 pb-6">
+        <div className="container flex flex-col items-center gap-3">
+          {!textMode && (
+            <>
+              <button onClick={micClick} disabled={phase === 'processing'} className={`relative w-20 h-20 rounded-full grid place-items-center transition-all disabled:opacity-50 ${phase === 'listening' ? 'bg-brand text-white mic-pulse' : phase === 'speaking' ? 'bg-secondary text-foreground border border-border' : 'bg-brand text-white hover:scale-105'}`}>
+                {phase === 'processing' ? <Loader2 className="w-7 h-7 animate-spin" /> : phase === 'listening' ? <span className="w-6 h-6 rounded-sm bg-white" /> : phase === 'speaking' ? <VolumeX className="w-7 h-7" /> : <Mic className="w-8 h-8" />}
               </button>
-            )}
-            <Textarea value={input} onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-              placeholder={listening ? 'Listening...' : 'Make your pitch. Answer their questions...'} rows={1}
-              className="resize-none min-h-[44px] max-h-32 bg-secondary border-border" />
-            <Button onClick={send} disabled={thinking || !input.trim()} className="shrink-0 h-11 rounded-lg"><Send className="w-4 h-4" /></Button>
-          </div>
-          {!micSupported && <p className="text-[11px] text-muted-foreground/70 mt-1.5">Voice input isn’t supported in this browser — type your pitch instead.</p>}
+              <div className="text-xs text-muted-foreground h-4">{phase === 'idle' ? 'Tap to speak' : phase === 'listening' ? 'Tap to send to the panel' : phase === 'speaking' ? 'Tap to skip' : 'Processing…'}</div>
+              {micSupported && <button onClick={() => setTextMode(true)} className="text-[11px] text-muted-foreground/60 hover:text-foreground underline">or type instead</button>}
+            </>
+          )}
+          {textMode && (
+            <div className="w-full max-w-2xl">
+              {!micSupported && <div className="text-[11px] text-amber-400 mb-2 text-center">Voice isn't supported in this browser — type your pitch below.</div>}
+              <div className="flex items-end gap-2">
+                <Textarea value={textVal} onChange={(e) => setTextVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText() } }} placeholder="Type what you'd say to the panel…" rows={2} className="bg-card border-border resize-none" disabled={phase === 'processing'} />
+                <Button onClick={sendText} disabled={phase === 'processing' || !textVal.trim()} className="rounded-lg h-11">{phase === 'processing' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}</Button>
+              </div>
+              {micSupported && <button onClick={() => setTextMode(false)} className="text-[11px] text-muted-foreground/60 hover:text-foreground underline mt-2">back to voice</button>}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* transcript drawer */}
+      <AnimatePresence>
+        {showT && (
+          <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'tween', duration: 0.25 }} className="fixed top-14 right-0 bottom-0 w-full max-w-md bg-card border-l border-border z-40 flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-border"><span className="text-sm font-medium text-foreground">Live transcript</span><Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setShowT(false)}><X className="w-4 h-4" /></Button></div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {transcript.length === 0 && <p className="text-sm text-muted-foreground">Your spoken pitch and the panel's replies will appear here as text.</p>}
+              {transcript.map((m) => <MessageBubble key={m.id} m={m} personas={personas} />)}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -864,7 +925,7 @@ function DebriefView({ user, go, sessionId }) {
           ))}
         </div>
       )}
-      <PersonaDialog persona={dp} beliefs={dp ? session.beliefs?.[dp.id] : null} history={session.belief_history} open={!!dp} onOpenChange={(o) => !o && setDp(null)} />
+      <PersonaDialog persona={dp} beliefs={dp ? session.beliefs?.[dp.id] : null} history={session.belief_history} quotes={dp ? (session.transcript || []).filter((m) => m.persona_id === dp.id).map((m) => m.content) : []} startupId={session.startup_id} open={!!dp} onOpenChange={(o) => !o && setDp(null)} />
 
       <div className="flex gap-2 mb-4">
         {[['analysis', 'Gaps & Scorecard'], ['deliberation', 'Panel Deliberation'], ['transcript', 'Transcript']].map(([k, l]) => (
@@ -1122,6 +1183,9 @@ function EditorView({ user, go, versionId }) {
 function StudioView({ user, go, startupId }) {
   const [data, setData] = useState(null)
   const [tab, setTab] = useState('overview')
+  const [notes, setNotes] = useState([])
+  useEffect(() => { setNotes(getNotes(startupId)) }, [startupId])
+  const removeNote = (i) => { const n = notes.slice(); n.splice(i, 1); setNotes(n); saveNotes(startupId, n) }
 
   const load = useCallback(() => api('/studio?startup_id=' + startupId).then(setData).catch(() => toast.error('Could not load studio')), [startupId])
   useEffect(() => { load() }, [load])
@@ -1173,6 +1237,18 @@ function StudioView({ user, go, startupId }) {
                   <span className="text-sm text-foreground">Round {x.round_number} · {x.panel_name} {x.is_demo && <span className="text-brand text-xs ml-1">DEMO</span>}</span>
                   <span className="text-xs text-muted-foreground">{x.verdict ? `${x.verdict.verdict} · ${x.verdict.final_score}` : x.status}</span>
                 </button>
+              ))}
+            </div>
+          </div>
+          <div className="md:col-span-3 rounded-2xl border border-border bg-card p-5">
+            <div className="text-sm font-medium text-foreground mb-3 flex items-center gap-2"><Quote className="w-4 h-4 text-brand" /> Your notes {notes.length > 0 && <span className="text-xs text-muted-foreground">({notes.length})</span>}</div>
+            {notes.length === 0 && <p className="text-sm text-muted-foreground">Open a persona (tap any investor in the pitch room or debrief) and save their sharpest lines here.</p>}
+            <div className="space-y-2">
+              {notes.map((n, i) => (
+                <div key={i} className="flex items-start gap-2 rounded-xl bg-secondary border border-border p-3">
+                  <div className="flex-1"><div className="text-[11px] text-brand mb-0.5">{n.persona}</div><p className="text-sm text-foreground/85 italic">“{n.text}”</p></div>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => removeNote(i)}><X className="w-3.5 h-3.5" /></Button>
+                </div>
               ))}
             </div>
           </div>
@@ -1268,8 +1344,26 @@ function StudioView({ user, go, startupId }) {
         </div>
       )}
 
-      {tab === 'actions' && (
+      {tab === 'actions' && (() => {
+        const total = data.gaps.length; const resolved = data.gaps.filter((g) => g.status === 'RESOLVED').length
+        const pct = total ? Math.round((resolved / total) * 100) : 0
+        const R = 34, C = 2 * Math.PI * R
+        return (
         <div className="space-y-2">
+          <div className="flex items-center gap-5 rounded-2xl border border-border bg-card p-5 mb-4">
+            <div className="relative w-24 h-24 shrink-0">
+              <svg className="w-24 h-24 -rotate-90" viewBox="0 0 80 80">
+                <circle cx="40" cy="40" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="7" />
+                <motion.circle cx="40" cy="40" r={R} fill="none" stroke="#22c55e" strokeWidth="7" strokeLinecap="round" strokeDasharray={C} initial={{ strokeDashoffset: C }} animate={{ strokeDashoffset: C - (C * pct) / 100 }} transition={{ duration: 0.9, ease: 'easeOut' }} />
+              </svg>
+              <div className="absolute inset-0 grid place-items-center"><span className="text-xl font-bold text-foreground tabular-nums">{pct}%</span></div>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-foreground">Gaps closed across all rounds</div>
+              <div className="text-2xl font-semibold text-foreground mt-0.5">{resolved}<span className="text-base text-muted-foreground"> / {total}</span></div>
+              <div className="text-xs text-muted-foreground mt-1">Keep closing gaps to lift your readiness score.</div>
+            </div>
+          </div>
           <p className="text-sm text-muted-foreground mb-2">Every recommended action from every round, in one checklist. Tick them off as you fix them — this syncs with your gaps.</p>
           {data.gaps.length === 0 && <p className="text-sm text-muted-foreground">No actions yet. Complete a pitch to generate them.</p>}
           {data.gaps.map((g, i) => (
@@ -1286,7 +1380,8 @@ function StudioView({ user, go, startupId }) {
             </label>
           ))}
         </div>
-      )}
+        )
+      })()}
 
       {tab === 'compare' && <CompareRounds sessions={ended} />}
     </Shell>
@@ -1343,6 +1438,30 @@ function CompareRounds({ sessions }) {
         </select>
         {scoreDelta != null && <span className={`text-sm font-medium ${scoreDelta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{scoreDelta >= 0 ? '↑ +' : '↓ '}{Math.abs(scoreDelta)} points</span>}
       </div>
+      {aDoc?.scorecard?.length > 0 && bDoc?.scorecard?.length > 0 && (() => {
+        const am = {}; aDoc.scorecard.forEach((s) => { am[s.dimension] = s.score })
+        const bm = {}; bDoc.scorecard.forEach((s) => { bm[s.dimension] = s.score })
+        return (
+          <div className="rounded-2xl border border-border bg-card p-5 mb-4">
+            <div className="text-sm font-medium text-foreground mb-3">Dimension-by-dimension diff · Round {aDoc.round_number} → Round {bDoc.round_number}</div>
+            <div className="grid sm:grid-cols-2 gap-x-8 gap-y-2">
+              {DIM_ORDER.map((k) => {
+                const a = am[k] ?? 0, b = bm[k] ?? 0, d = b - a
+                return (
+                  <div key={k} className="flex items-center gap-3 text-sm">
+                    <span className="text-foreground/90 flex-1">{DIM_LABELS[k]}</span>
+                    <div className="flex items-center gap-1 w-24">
+                      <div className="h-1.5 flex-1 rounded-full bg-secondary overflow-hidden"><div className="h-full bg-brand" style={{ width: (b * 10) + '%' }} /></div>
+                    </div>
+                    <span className="tabular-nums text-muted-foreground w-16 text-right">{a} → {b}</span>
+                    <span className={`w-12 text-right tabular-nums ${d > 0 ? 'text-emerald-400' : d < 0 ? 'text-red-400' : 'text-muted-foreground'}`}>{d > 0 ? '+' + d : d < 0 ? d : '—'}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
       <div className="grid md:grid-cols-2 gap-4">
         <Col doc={aDoc} /><Col doc={bDoc} />
       </div>
@@ -1450,7 +1569,11 @@ function DemoPitchView({ user, go, sessionId }) {
 }
 
 // ================================================================== PERSONA DEEP-DIVE
-function PersonaDialog({ persona, beliefs, history, open, onOpenChange }) {
+// notes stored client-side per startup
+function getNotes(startupId) { try { return JSON.parse(localStorage.getItem('ec_notes_' + startupId) || '[]') } catch (e) { return [] } }
+function saveNotes(startupId, arr) { try { localStorage.setItem('ec_notes_' + startupId, JSON.stringify(arr)) } catch (e) {} }
+
+function PersonaDialog({ persona, beliefs, history, quotes, startupId, open, onOpenChange }) {
   if (!persona) return null
   const dims = beliefs || {}
   const moves = (history || []).filter((h) => h.persona_id === persona.id)
@@ -1500,6 +1623,19 @@ function PersonaDialog({ persona, beliefs, history, open, onOpenChange }) {
                     </div>
                   )
                 })}
+              </div>
+            </div>
+          )}
+          {(quotes || []).length > 0 && (
+            <div>
+              <div className="text-sm font-medium text-foreground mb-2 flex items-center gap-1"><Quote className="w-4 h-4 text-brand" /> What they said — save a quote to your notes</div>
+              <div className="space-y-2">
+                {quotes.filter(Boolean).map((q, i) => (
+                  <div key={i} className="flex items-start gap-2 rounded-xl bg-secondary border border-border p-2.5">
+                    <p className="text-xs text-foreground/85 flex-1 italic">“{q}”</p>
+                    <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" title="Save to notes" onClick={() => { const n = getNotes(startupId); n.unshift({ persona: persona.name, text: q, ts: Date.now() }); saveNotes(startupId, n); toast.success('Saved to your notes.') }}><Copy className="w-3.5 h-3.5" /></Button>
+                  </div>
+                ))}
               </div>
             </div>
           )}

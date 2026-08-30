@@ -584,18 +584,20 @@ function PitchRoomView({ user, go, sessionId }) {
   const [elapsed, setElapsed] = useState(0)
   const [ending, setEnding] = useState(false)
   const scrollRef = useRef(null)
-  const recogRef = useRef(null)
-  const finalRef = useRef('')
-  const silenceRef = useRef(null)
+  const wsRef = useRef(null)
+  const mediaStreamRef = useRef(null)
+  const recorderRef = useRef(null)
+  const audioRef = useRef(null)
+  const finalBufRef = useRef('')
   const submittingRef = useRef(false)
   const submitRef = useRef(null)
-  const voicesRef = useRef([])
   const personasRef = useRef([])
   const phaseRef = useRef('idle')
   const micOnRef = useRef(false)
   const ttsOnRef = useRef(true)
   const setPhaseBoth = (p) => { phaseRef.current = p; setPhase(p) }
-  const setTts = (v) => { ttsOnRef.current = v; setTtsOn(v); if (!v && typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel() }
+  const stopTTS = () => { try { if (audioRef.current) { audioRef.current.onended = null; audioRef.current.onerror = null; audioRef.current.pause(); audioRef.current = null } } catch (e) {} }
+  const setTts = (v) => { ttsOnRef.current = v; setTtsOn(v); if (!v) stopTTS() }
 
   useEffect(() => {
     api('/sessions/' + sessionId).then((s) => {
@@ -608,99 +610,130 @@ function PitchRoomView({ user, go, sessionId }) {
   useEffect(() => { if (thinking) { const t = setInterval(() => setStatusIdx((i) => (i + 1) % STATUS_MSGS.length), 1400); return () => clearInterval(t) } }, [thinking])
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [transcript, thinking, liveText])
 
+  const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+  const VOICE_MODELS = ['aura-2-orpheus-en', 'aura-2-thalia-en', 'aura-2-arcas-en']
+  const voiceForPersona = (personaId) => {
+    const pl = personasRef.current || []
+    const idx = Math.max(0, pl.findIndex((p) => p.id === personaId))
+    return VOICE_MODELS[idx % VOICE_MODELS.length]
+  }
+
+  const teardownAudio = () => {
+    try { if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop() } catch (e) {}
+    try { if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close() } } catch (e) {}
+    try { mediaStreamRef.current && mediaStreamRef.current.getTracks().forEach((t) => t.stop()) } catch (e) {}
+    mediaStreamRef.current = null; recorderRef.current = null; wsRef.current = null
+    stopTTS()
+  }
+  const closeSocketOnly = () => {
+    try { if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop() } catch (e) {}
+    try {
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'Finalize' })); ws.send(JSON.stringify({ type: 'CloseStream' })) }
+      if (ws) { ws.onclose = null; ws.close() }
+    } catch (e) {}
+    recorderRef.current = null; wsRef.current = null; setListening(false)
+  }
+  const maybeSubmit = () => {
+    if (phaseRef.current !== 'listening' || !micOnRef.current || submittingRef.current) return
+    const text = finalBufRef.current.trim()
+    if (text.length >= 2 && submitRef.current) submitRef.current(text)
+  }
+  const openSocketAndRecord = async () => {
+    if (!mediaStreamRef.current) {
+      try { mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) }
+      catch (e) { micOnRef.current = false; setMicOn(false); setPhaseBoth('idle'); toast.error('Microphone blocked. Allow mic access in your browser, then tap the mic again.'); return }
+    }
+    let auth
+    try { auth = await api('/deepgram/token') } catch (e) { toast.error('Could not reach the voice service.'); setPhaseBoth('idle'); return }
+    const proto = auth?.mode === 'bearer' ? ['bearer', auth.token] : ['token', auth.key]
+    const params = new URLSearchParams({ model: 'nova-3', language: 'en-US', interim_results: 'true', punctuate: 'true', smart_format: 'true', endpointing: '300', utterance_end_ms: '1000', vad_events: 'true' })
+    let ws
+    try { ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params.toString()}`, proto) } catch (e) { toast.error('Voice connection failed.'); setPhaseBoth('idle'); return }
+    wsRef.current = ws
+    ws.onopen = () => {
+      if (!micOnRef.current) { try { ws.close() } catch (e) {} return }
+      try {
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
+        const mr = new MediaRecorder(mediaStreamRef.current, { mimeType: mime })
+        recorderRef.current = mr
+        mr.ondataavailable = (ev) => { if (ev.data && ev.data.size && ws.readyState === WebSocket.OPEN) ws.send(ev.data) }
+        mr.start(250)
+        setListening(true)
+      } catch (e) { toast.error('Recorder failed to start.') }
+    }
+    ws.onmessage = ({ data }) => {
+      let msg; try { msg = JSON.parse(data) } catch (e) { return }
+      if (msg.type === 'UtteranceEnd') { maybeSubmit(); return }
+      if (msg.type !== 'Results') return
+      const text = msg.channel?.alternatives?.[0]?.transcript || ''
+      if (msg.is_final) {
+        if (text) finalBufRef.current += (finalBufRef.current ? ' ' : '') + text
+        setLiveText(finalBufRef.current)
+      } else {
+        setLiveText((finalBufRef.current + (text ? ' ' + text : '')).trim())
+      }
+      if (msg.speech_final) maybeSubmit()
+    }
+    ws.onerror = () => { setListening(false) }
+    ws.onclose = () => { setListening(false) }
+  }
+
   useEffect(() => {
-    const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
-    if (!SR) { setMicSupported(false); return }
-    const r = new SR(); r.continuous = true; r.interimResults = true; r.lang = 'en-IN'
-    r.onresult = (e) => {
-      let interim = ''
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript
-        if (e.results[i].isFinal) finalRef.current += t + ' '
-        else interim += t
-      }
-      setLiveText((finalRef.current + interim).trim())
-      clearTimeout(silenceRef.current)
-      silenceRef.current = setTimeout(() => {
-        if (phaseRef.current !== 'listening' || !micOnRef.current) return
-        const text = finalRef.current.trim()
-        if (text.length >= 2 && submitRef.current) submitRef.current(text)
-      }, 1700)
-    }
-    r.onend = () => {
-      setListening(false)
-      // keep the mic alive for the whole conversation: auto-restart while actively listening
-      if (micOnRef.current && phaseRef.current === 'listening' && !submittingRef.current) {
-        try { r.start(); setListening(true) } catch (e) {}
-      }
-    }
-    r.onerror = () => { setListening(false) }
-    recogRef.current = r
-    if (window.speechSynthesis) {
-      const load = () => { voicesRef.current = window.speechSynthesis.getVoices() }
-      load(); window.speechSynthesis.onvoiceschanged = load
-    }
-    return () => {
-      try { r.onend = null; r.onresult = null; r.stop() } catch (e) {}
-      try { window.speechSynthesis && window.speechSynthesis.cancel() } catch (e) {}
-      clearTimeout(silenceRef.current)
-    }
+    const ok = typeof window !== 'undefined' && navigator?.mediaDevices?.getUserMedia && window.MediaRecorder && window.WebSocket
+    if (!ok) setMicSupported(false)
+    return () => { teardownAudio() }
   }, [])
 
-  const startMic = () => {
+  const startMic = async () => {
     if (!micSupported) return
     micOnRef.current = true; setMicOn(true)
-    finalRef.current = ''; setLiveText('')
+    finalBufRef.current = ''; setLiveText('')
     setPhaseBoth('listening')
-    try { recogRef.current?.start(); setListening(true) } catch (e) {}
+    await openSocketAndRecord()
   }
   const stopMic = () => {
     micOnRef.current = false; setMicOn(false)
-    clearTimeout(silenceRef.current)
-    setPhaseBoth('idle'); setListening(false)
-    try { recogRef.current?.stop() } catch (e) {}
-    try { window.speechSynthesis && window.speechSynthesis.cancel() } catch (e) {}
+    setPhaseBoth('idle')
+    closeSocketOnly()
+    try { mediaStreamRef.current && mediaStreamRef.current.getTracks().forEach((t) => t.stop()) } catch (e) {}
+    mediaStreamRef.current = null
+    stopTTS()
   }
   const toggleMic = () => { if (micOnRef.current) stopMic(); else startMic() }
 
-  const applyVoice = (u, personaId) => {
-    const pl = personasRef.current || []
-    const idx = Math.max(0, pl.findIndex((p) => p.id === personaId))
-    const prof = VOICE_PROFILES[idx % VOICE_PROFILES.length]
-    u.rate = prof.rate; u.pitch = prof.pitch
-    const all = voicesRef.current || []
-    const eng = all.filter((v) => /^en/i.test(v.lang))
-    const pool = eng.length ? eng : all
-    if (pool.length) u.voice = pool[idx % pool.length]
-  }
-  const resumeListening = () => {
+  const resumeListening = async () => {
     submittingRef.current = false
-    if (!micOnRef.current) { setPhaseBoth('idle'); return }
-    finalRef.current = ''; setLiveText('')
+    if (!micOnRef.current) { setPhaseBoth('idle'); setMicOn(false); return }
+    // conversation is still active -> force UI + refs back into the listening state
+    micOnRef.current = true; setMicOn(true); setListening(true)
+    finalBufRef.current = ''; setLiveText('')
     setPhaseBoth('listening')
-    try { recogRef.current?.start(); setListening(true) } catch (e) {}
+    await openSocketAndRecord()
   }
-  const speakThen = (pm) => {
+  const speakThen = async (pm) => {
     setPhaseBoth('speaking'); setSpeaker(pm.persona_id)
     const done = () => { setSpeaker(null); resumeListening() }
-    if (!ttsOnRef.current || typeof window === 'undefined' || !window.speechSynthesis) { setTimeout(done, 500); return }
+    if (!ttsOnRef.current) { setTimeout(done, 300); return }
     try {
-      window.speechSynthesis.cancel()
-      const u = new SpeechSynthesisUtterance(pm.content); applyVoice(u, pm.persona_id)
-      u.onend = done; u.onerror = done
-      window.speechSynthesis.speak(u)
+      const r = await fetch('/api/deepgram/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: pm.content, model: voiceForPersona(pm.persona_id) }) })
+      if (!r.ok) throw new Error('tts')
+      const blob = await r.blob()
+      const audio = new Audio(URL.createObjectURL(blob))
+      audioRef.current = audio
+      audio.onended = () => { try { URL.revokeObjectURL(audio.src) } catch (e) {}; done() }
+      audio.onerror = () => done()
+      await audio.play().catch(() => done())
     } catch (e) { done() }
   }
-  const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
   const submitTurn = async (text) => {
     const msg = (text || '').trim()
     if (!msg || submittingRef.current || thinking) return
     submittingRef.current = true
-    clearTimeout(silenceRef.current)
-    finalRef.current = ''; setLiveText(''); setInput('')
-    setPhaseBoth('thinking'); setListening(false)
-    try { recogRef.current?.stop() } catch (e) {}
+    finalBufRef.current = ''; setLiveText(''); setInput('')
+    setPhaseBoth('thinking')
+    closeSocketOnly()
     setTranscript((t) => [...t, { id: 'f' + Date.now(), role: 'founder', content: msg }])
     setThinking(true); setStatusIdx(0)
     try {
@@ -720,8 +753,7 @@ function PitchRoomView({ user, go, sessionId }) {
   const endPitch = async () => {
     if (transcript.length < 2) { toast.error('Say at least one thing before ending.'); return }
     micOnRef.current = false; setMicOn(false)
-    try { recogRef.current?.stop() } catch (e) {}
-    try { window.speechSynthesis && window.speechSynthesis.cancel() } catch (e) {}
+    teardownAudio()
     setEnding(true)
     try { await api('/pitch/end', { method: 'POST', body: { session_id: sessionId } }); go('debrief', { sessionId }) }
     catch (err) { toast.error('Deliberation failed. Try again.'); setEnding(false) }

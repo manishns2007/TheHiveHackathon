@@ -580,6 +580,8 @@ function PitchRoomView({ user, go, sessionId }) {
   const [listening, setListening] = useState(false)
   const [micOn, setMicOn] = useState(false)
   const [phase, setPhase] = useState('idle')
+  const [stage, setStage] = useState('pitch')
+  const [pitchLeft, setPitchLeft] = useState(180)
   const [micSupported, setMicSupported] = useState(true)
   const [elapsed, setElapsed] = useState(0)
   const [ending, setEnding] = useState(false)
@@ -589,13 +591,20 @@ function PitchRoomView({ user, go, sessionId }) {
   const recorderRef = useRef(null)
   const audioRef = useRef(null)
   const finalBufRef = useRef('')
+  const stageRef = useRef('pitch')
+  const pitchStartedRef = useRef(false)
+  const pitchTimerRef = useRef(null)
+  const answerSilenceRef = useRef(null)
+  const endingPitchRef = useRef(false)
   const submittingRef = useRef(false)
   const submitRef = useRef(null)
   const personasRef = useRef([])
   const phaseRef = useRef('idle')
   const micOnRef = useRef(false)
   const ttsOnRef = useRef(true)
+  const PITCH_SECONDS = 180
   const setPhaseBoth = (p) => { phaseRef.current = p; setPhase(p) }
+  const setStageBoth = (s) => { stageRef.current = s; setStage(s) }
   const stopTTS = () => { try { if (audioRef.current) { audioRef.current.onended = null; audioRef.current.onerror = null; audioRef.current.pause(); audioRef.current = null } } catch (e) {} }
   const setTts = (v) => { ttsOnRef.current = v; setTtsOn(v); if (!v) stopTTS() }
 
@@ -619,6 +628,8 @@ function PitchRoomView({ user, go, sessionId }) {
   }
 
   const teardownAudio = () => {
+    try { clearInterval(pitchTimerRef.current) } catch (e) {}
+    try { clearTimeout(answerSilenceRef.current) } catch (e) {}
     try { if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop() } catch (e) {}
     try { if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close() } } catch (e) {}
     try { mediaStreamRef.current && mediaStreamRef.current.getTracks().forEach((t) => t.stop()) } catch (e) {}
@@ -633,11 +644,6 @@ function PitchRoomView({ user, go, sessionId }) {
       if (ws) { ws.onclose = null; ws.close() }
     } catch (e) {}
     recorderRef.current = null; wsRef.current = null; setListening(false)
-  }
-  const maybeSubmit = () => {
-    if (phaseRef.current !== 'listening' || !micOnRef.current || submittingRef.current) return
-    const text = finalBufRef.current.trim()
-    if (text.length >= 2 && submitRef.current) submitRef.current(text)
   }
   const openSocketAndRecord = async () => {
     if (!mediaStreamRef.current) {
@@ -664,16 +670,37 @@ function PitchRoomView({ user, go, sessionId }) {
     }
     ws.onmessage = ({ data }) => {
       let msg; try { msg = JSON.parse(data) } catch (e) { return }
-      if (msg.type === 'UtteranceEnd') { maybeSubmit(); return }
-      if (msg.type !== 'Results') return
+      const isResults = msg.type === 'Results'
+      if (!isResults) return
       const text = msg.channel?.alternatives?.[0]?.transcript || ''
+      if (stageRef.current === 'pitch') {
+        // PITCH PHASE: accumulate the whole pitch, never auto-submit mid-pitch.
+        if ((text || finalBufRef.current) && !pitchStartedRef.current) startPitchTimer()
+        if (msg.is_final) {
+          if (text) finalBufRef.current += (finalBufRef.current ? ' ' : '') + text
+          setLiveText(finalBufRef.current)
+          if (/(thank you|thank u|thanks)/i.test(text)) endPitchPhase()
+        } else {
+          setLiveText((finalBufRef.current + (text ? ' ' + text : '')).trim())
+        }
+        return
+      }
+      // Q&A PHASE: accumulate the current answer; a 5s silence ends the answer.
       if (msg.is_final) {
         if (text) finalBufRef.current += (finalBufRef.current ? ' ' : '') + text
         setLiveText(finalBufRef.current)
       } else {
         setLiveText((finalBufRef.current + (text ? ' ' + text : '')).trim())
       }
-      if (msg.speech_final) maybeSubmit()
+      if (text || msg.is_final) {
+        clearTimeout(answerSilenceRef.current)
+        answerSilenceRef.current = setTimeout(() => {
+          if (phaseRef.current === 'listening' && stageRef.current === 'qa' && !submittingRef.current) {
+            const t = finalBufRef.current.trim()
+            if (t.length >= 2 && submitRef.current) submitRef.current(t, 'answer')
+          }
+        }, 5000)
+      }
     }
     ws.onerror = () => { setListening(false) }
     ws.onclose = () => { setListening(false) }
@@ -689,18 +716,43 @@ function PitchRoomView({ user, go, sessionId }) {
     if (!micSupported) return
     micOnRef.current = true; setMicOn(true)
     finalBufRef.current = ''; setLiveText('')
+    if (stageRef.current === 'pitch') { pitchStartedRef.current = false; endingPitchRef.current = false; setPitchLeft(PITCH_SECONDS) }
     setPhaseBoth('listening')
     await openSocketAndRecord()
   }
   const stopMic = () => {
     micOnRef.current = false; setMicOn(false)
     setPhaseBoth('idle')
+    clearPitchTimer(); clearTimeout(answerSilenceRef.current)
     closeSocketOnly()
     try { mediaStreamRef.current && mediaStreamRef.current.getTracks().forEach((t) => t.stop()) } catch (e) {}
     mediaStreamRef.current = null
     stopTTS()
   }
   const toggleMic = () => { if (micOnRef.current) stopMic(); else startMic() }
+
+  const clearPitchTimer = () => { try { clearInterval(pitchTimerRef.current) } catch (e) {} pitchTimerRef.current = null }
+  const startPitchTimer = () => {
+    if (pitchStartedRef.current) return
+    pitchStartedRef.current = true
+    setPitchLeft(PITCH_SECONDS)
+    pitchTimerRef.current = setInterval(() => {
+      setPitchLeft((v) => {
+        if (v <= 1) { clearPitchTimer(); endPitchPhase(); return 0 }
+        return v - 1
+      })
+    }, 1000)
+  }
+  const endPitchPhase = () => {
+    if (endingPitchRef.current || stageRef.current !== 'pitch') return
+    endingPitchRef.current = true
+    clearPitchTimer(); clearTimeout(answerSilenceRef.current)
+    const pitchText = (finalBufRef.current || '').trim()
+    closeSocketOnly()
+    if (!pitchText || pitchText.length < 2) { toast.error('Say your pitch before finishing.'); endingPitchRef.current = false; if (micOnRef.current) resumeListening(); return }
+    setStageBoth('qa')
+    if (submitRef.current) submitRef.current(pitchText, 'pitch')
+  }
 
   const resumeListening = async () => {
     submittingRef.current = false
@@ -727,17 +779,18 @@ function PitchRoomView({ user, go, sessionId }) {
     } catch (e) { done() }
   }
 
-  const submitTurn = async (text) => {
+  const submitTurn = async (text, kind) => {
     const msg = (text || '').trim()
     if (!msg || submittingRef.current || thinking) return
     submittingRef.current = true
+    clearTimeout(answerSilenceRef.current)
     finalBufRef.current = ''; setLiveText(''); setInput('')
     setPhaseBoth('thinking')
     closeSocketOnly()
     setTranscript((t) => [...t, { id: 'f' + Date.now(), role: 'founder', content: msg }])
     setThinking(true); setStatusIdx(0)
     try {
-      const res = await api('/pitch/turn', { method: 'POST', body: { session_id: sessionId, message: msg } })
+      const res = await api('/pitch/turn', { method: 'POST', body: { session_id: sessionId, message: msg, kind: kind || 'answer' } })
       setBeliefs(res.beliefs)
       setTranscript((t) => [...t, res.persona_message])
       if (res.contradictions?.length) toast.error(`${res.contradictions.length} contradiction${res.contradictions.length > 1 ? 's' : ''} detected`)
@@ -761,13 +814,30 @@ function PitchRoomView({ user, go, sessionId }) {
 
   if (!session) return <div className="min-h-screen grid place-items-center bg-white"><Loader2 className="w-6 h-6 animate-spin text-brand" /></div>
 
+  const isPitch = stage === 'pitch'
+  let micTitle = 'Tap to start'
+  let micHint = ''
+  if (isPitch) {
+    if (!micOn) { micTitle = 'Tap the mic and start pitching'; micHint = 'The panel listens without interrupting. Say "thank you" or tap "Done pitching" when finished (auto-ends at 3:00).' }
+    else if (phase === 'listening') { micTitle = 'Pitching — speak freely'; micHint = 'Say "thank you" or tap "Done pitching" to move to questions.' }
+    else if (phase === 'thinking') { micTitle = 'The panel is preparing its first question...' }
+    else if (phase === 'speaking') { micTitle = 'A judge is speaking...' }
+  } else {
+    if (phase === 'listening') { micTitle = 'Answering — speak your answer'; micHint = 'Pause for about 5 seconds when your answer is complete.' }
+    else if (phase === 'thinking') { micTitle = 'The panel is considering your answer...' }
+    else if (phase === 'speaking') { micTitle = 'A judge is asking a question...' }
+    else if (!micOn) { micTitle = 'Tap the mic to answer' }
+  }
+
   return (
     <div className="min-h-screen bg-white flex flex-col">
       <div className="bg-white/85 backdrop-blur-md border-b border-neutral-100 sticky top-0 z-40">
         <div className="container flex items-center justify-between h-14">
           <div className="flex items-center gap-4">
             <Logo className="text-[15px]" />
-            <Badge variant="outline" className="hidden sm:flex border-neutral-200 text-neutral-500 gap-1"><Clock className="w-3 h-3" /> {fmtTime(elapsed)}</Badge>
+            {stage === 'pitch'
+              ? <Badge variant="outline" className="hidden sm:flex border-brand/40 text-brand bg-brand/5 gap-1"><Clock className="w-3 h-3" /> Pitch {fmtTime(pitchLeft)}</Badge>
+              : <Badge variant="outline" className="hidden sm:flex border-neutral-200 text-neutral-500 gap-1"><Clock className="w-3 h-3" /> {fmtTime(elapsed)}</Badge>}
             <span className="text-sm text-neutral-500 hidden md:block">{session.panel_name}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -813,8 +883,8 @@ function PitchRoomView({ user, go, sessionId }) {
           {transcript.length === 0 && !liveText && (
             <div className="text-center py-16">
               <div className="w-14 h-14 rounded-full brand-gradient grid place-items-center mx-auto mb-4"><Mic className="w-6 h-6 text-white" /></div>
-              <h3 className="text-lg font-semibold text-neutral-900">The panel is listening.</h3>
-              <p className="text-neutral-500 mt-1 text-sm max-w-md mx-auto">Tap the mic below and just talk. Your words appear here live, and the panel replies out loud — a real back-and-forth conversation.</p>
+              <h3 className="text-lg font-semibold text-neutral-900">Pitch the panel — uninterrupted.</h3>
+              <p className="text-neutral-500 mt-1 text-sm max-w-md mx-auto">{'Tap the mic and deliver your full pitch. The panel listens without interrupting. Say "thank you" or tap "Done pitching" when you finish (auto-ends at 3:00), then the Q&A begins.'}</p>
             </div>
           )}
           {transcript.map((m) => <PitchCaption key={m.id} m={m} personas={personas} speaking={speaker === m.persona_id && m.role !== 'founder'} />)}
@@ -837,19 +907,18 @@ function PitchRoomView({ user, go, sessionId }) {
         <div className="container py-4">
           {micSupported ? (
             <div className="flex flex-col items-center gap-2">
-              <button onClick={toggleMic} disabled={phase === 'thinking'} title={micOn ? 'Pause microphone' : 'Start speaking'}
-                className={`relative w-16 h-16 rounded-full grid place-items-center transition-all disabled:opacity-60 ${micOn && phase === 'listening' ? 'bg-brand mic-pulse' : 'bg-neutral-900 hover:bg-neutral-800'}`}>
-                {phase === 'thinking' ? <Loader2 className="w-6 h-6 text-white animate-spin" /> : phase === 'speaking' ? <Volume2 className="w-6 h-6 text-white" /> : <Mic className="w-6 h-6 text-white" />}
-              </button>
+              <div className="flex items-center gap-3">
+                <button onClick={toggleMic} disabled={phase === 'thinking'} title={micOn ? 'Pause microphone' : 'Start'}
+                  className={`relative w-16 h-16 rounded-full grid place-items-center transition-all disabled:opacity-60 ${micOn && phase === 'listening' ? 'bg-brand mic-pulse' : 'bg-neutral-900 hover:bg-neutral-800'}`}>
+                  {phase === 'thinking' ? <Loader2 className="w-6 h-6 text-white animate-spin" /> : phase === 'speaking' ? <Volume2 className="w-6 h-6 text-white" /> : <Mic className="w-6 h-6 text-white" />}
+                </button>
+                {isPitch && micOn && phase === 'listening' && (
+                  <Button onClick={endPitchPhase} className="h-11 rounded-full px-5 bg-neutral-900 hover:bg-neutral-800 text-white">Done pitching <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                )}
+              </div>
               <div className="text-center">
-                <p className="text-sm font-medium text-neutral-900">
-                  {!micOn ? 'Tap to start the conversation'
-                    : phase === 'listening' ? 'Listening — just speak, pause when you\u2019re done'
-                    : phase === 'thinking' ? 'The panel is considering your answer\u2026'
-                    : phase === 'speaking' ? 'The panel is responding\u2026'
-                    : 'Mic on'}
-                </p>
-                {micOn && <p className="text-[11px] text-neutral-400 mt-0.5">Mic stays on for the whole conversation · tap to pause</p>}
+                <p className="text-sm font-medium text-neutral-900">{micTitle}</p>
+                {micHint && <p className="text-[11px] text-neutral-400 mt-0.5">{micHint}</p>}
               </div>
             </div>
           ) : (
@@ -857,9 +926,9 @@ function PitchRoomView({ user, go, sessionId }) {
               <p className="text-[11px] text-neutral-400 mb-1.5">Voice input isn\u2019t supported in this browser — type your answer instead.</p>
               <div className="flex items-end gap-2">
                 <Textarea value={input} onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (input.trim()) submitTurn(input.trim()) } }}
-                  placeholder="Type your pitch\u2026" rows={1} className="resize-none min-h-[44px] max-h-32 bg-[#f7f8f4]" />
-                <Button onClick={() => input.trim() && submitTurn(input.trim())} disabled={thinking || !input.trim()} className="shrink-0 h-11 rounded-lg"><Send className="w-4 h-4" /></Button>
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const t = input.trim(); if (t) { const k = isPitch ? 'pitch' : 'answer'; if (isPitch) setStageBoth('qa'); submitTurn(t, k) } } }}
+                  placeholder={isPitch ? 'Type your full pitch, then send…' : 'Type your answer…'} rows={1} className="resize-none min-h-[44px] max-h-32 bg-[#f7f8f4]" />
+                <Button onClick={() => { const t = input.trim(); if (!t) return; const k = isPitch ? 'pitch' : 'answer'; if (isPitch) setStageBoth('qa'); submitTurn(t, k) }} disabled={thinking || !input.trim()} className="shrink-0 h-11 rounded-lg"><Send className="w-4 h-4" /></Button>
               </div>
             </div>
           )}

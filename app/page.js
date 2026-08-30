@@ -615,7 +615,7 @@ function PitchRoomView({ user, go, sessionId }) {
     }).catch(() => { toast.error('Could not load session'); go('dashboard') })
   }, [sessionId])
 
-  useEffect(() => { const t = setInterval(() => setElapsed((e) => e + 1), 1000); return () => clearInterval(t) }, [])
+  useEffect(() => { const t = setInterval(() => { if (phaseRef.current === 'listening') setElapsed((e) => e + 1) }, 1000); return () => clearInterval(t) }, [])
   useEffect(() => { if (thinking) { const t = setInterval(() => setStatusIdx((i) => (i + 1) % STATUS_MSGS.length), 1400); return () => clearInterval(t) } }, [thinking])
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [transcript, thinking, liveText])
 
@@ -685,19 +685,21 @@ function PitchRoomView({ user, go, sessionId }) {
         }
         return
       }
-      // Q&A PHASE: accumulate the current answer; a 5s silence ends the answer.
+      // Q&A PHASE: accumulate the current answer; ~5s of real silence locks it.
       if (msg.is_final) {
         if (text) finalBufRef.current += (finalBufRef.current ? ' ' : '') + text
         setLiveText(finalBufRef.current)
-      } else {
-        setLiveText((finalBufRef.current + (text ? ' ' + text : '')).trim())
+      } else if (text) {
+        setLiveText((finalBufRef.current + ' ' + text).trim())
       }
-      if (text || msg.is_final) {
+      // Only real (non-empty) speech re-arms the 5s silence timer. Deepgram emits
+      // periodic EMPTY is_final results during silence which must NOT reset it.
+      if (text) {
         clearTimeout(answerSilenceRef.current)
         answerSilenceRef.current = setTimeout(() => {
           if (phaseRef.current === 'listening' && stageRef.current === 'qa' && !submittingRef.current) {
             const t = finalBufRef.current.trim()
-            if (t.length >= 2 && submitRef.current) submitRef.current(t, 'answer')
+            if (t.length >= 1 && submitRef.current) submitRef.current(t, 'answer')
           }
         }, 5000)
       }
@@ -752,6 +754,13 @@ function PitchRoomView({ user, go, sessionId }) {
     if (!pitchText || pitchText.length < 2) { toast.error('Say your pitch before finishing.'); endingPitchRef.current = false; if (micOnRef.current) resumeListening(); return }
     setStageBoth('qa')
     if (submitRef.current) submitRef.current(pitchText, 'pitch')
+  }
+  const submitAnswerNow = () => {
+    if (submittingRef.current || stageRef.current !== 'qa') return
+    clearTimeout(answerSilenceRef.current)
+    const t = (finalBufRef.current || liveText || '').trim()
+    if (t.length < 1) { toast.error('Say your answer first, then submit.'); return }
+    if (submitRef.current) submitRef.current(t, 'answer')
   }
 
   const resumeListening = async () => {
@@ -823,7 +832,7 @@ function PitchRoomView({ user, go, sessionId }) {
     else if (phase === 'thinking') { micTitle = 'The panel is preparing its first question...' }
     else if (phase === 'speaking') { micTitle = 'A judge is speaking...' }
   } else {
-    if (phase === 'listening') { micTitle = 'Answering — speak your answer'; micHint = 'Pause for about 5 seconds when your answer is complete.' }
+    if (phase === 'listening') { micTitle = 'Answering — speak your answer'; micHint = 'Pause ~5 seconds when done, or tap "Submit answer".' }
     else if (phase === 'thinking') { micTitle = 'The panel is considering your answer...' }
     else if (phase === 'speaking') { micTitle = 'A judge is asking a question...' }
     else if (!micOn) { micTitle = 'Tap the mic to answer' }
@@ -914,6 +923,9 @@ function PitchRoomView({ user, go, sessionId }) {
                 </button>
                 {isPitch && micOn && phase === 'listening' && (
                   <Button onClick={endPitchPhase} className="h-11 rounded-full px-5 bg-neutral-900 hover:bg-neutral-800 text-white">Done pitching <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                )}
+                {!isPitch && micOn && phase === 'listening' && (
+                  <Button onClick={submitAnswerNow} className="h-11 rounded-full px-5 bg-brand hover:bg-brand/90 text-white">Submit answer <ChevronRight className="w-4 h-4 ml-1" /></Button>
                 )}
               </div>
               <div className="text-center">

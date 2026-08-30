@@ -119,6 +119,9 @@ backend:
         - working: true
           agent: "testing"
           comment: "✅ TESTED: Wrong password correctly returns 401. Correct login returns user with id, email, name. User ID: a7d37db1-4c3e-4653-8211-fbfcd08a86f8"
+        - working: true
+          agent: "testing"
+          comment: "✅ RETESTED (post-recovery): Wrong password correctly returns 401. Correct login returns user with id, email, name. User ID: 2ab66ee6-46b7-4448-90e7-adeac9013e78. Working correctly after environment recovery."
   - task: "Panels + personas (/api/panels)"
     implemented: true
     working: true
@@ -133,6 +136,9 @@ backend:
         - working: true
           agent: "testing"
           comment: "✅ TESTED: Returns exactly 3 panels (shark, vc, operator) with 9 total personas (3 per panel) and 10 dimensions. All structure correct."
+        - working: true
+          agent: "testing"
+          comment: "✅ RETESTED (post-recovery): Returns exactly 3 panels (shark, vc, operator) with 9 total personas (3 per panel) and 10 dimensions. All structure correct."
   - task: "Startup create/list/get (/api/startups)"
     implemented: true
     working: true
@@ -147,6 +153,9 @@ backend:
         - working: true
           agent: "testing"
           comment: "✅ TESTED: POST creates startup with UUID. GET ?user_id= lists startups correctly. GET /startups/:id retrieves specific startup. All CRUD operations working."
+        - working: true
+          agent: "testing"
+          comment: "✅ RETESTED (post-recovery): POST creates startup with UUID (a6ef5b5d-b93a-40e1-b36a-8a09bc7b69ff). GET ?user_id= lists startups correctly. GET /startups/:id retrieves specific startup. All CRUD operations working. No Mongo _id leaked."
   - task: "Session create/get/list (/api/sessions)"
     implemented: true
     working: true
@@ -161,6 +170,9 @@ backend:
         - working: true
           agent: "testing"
           comment: "✅ TESTED: POST creates session with round_number=1, initial beliefs (3 personas × 10 dimensions = 5). GET /sessions/:id returns full session with startup + 3 panel_personas. All working correctly."
+        - working: true
+          agent: "testing"
+          comment: "✅ RETESTED (post-recovery): POST creates session with round_number=1, initial beliefs (3 personas × 10 dimensions = 5). GET /sessions/:id returns full session with startup + 3 panel_personas. All working correctly."
   - task: "Pitch turn engine (/api/pitch/turn) - LLM claim extraction, contradiction detection, belief updates"
     implemented: true
     working: true
@@ -175,6 +187,9 @@ backend:
         - working: true
           agent: "testing"
           comment: "✅ TESTED: CRITICAL TEST PASSED! Turn 1 completed in 12.1s with persona response, claims extraction (4 claims), belief changes (3). Turn 2 (CAC contradiction) completed in 14.5s. CONTRADICTION DETECTED: 'Rs 20,000 / 50 customers = Rs 400 per customer, which is exactly 2x the stated CAC of Rs 200' with HIGH severity. Economics belief dropped from 6→4. Transcript and claims persisted correctly. LLM integration working perfectly."
+        - working: true
+          agent: "testing"
+          comment: "✅ RETESTED (post-recovery, NEW MODEL claude-sonnet-4-5-20250929): CRITICAL TEST PASSED! Turn 1 completed in 8.1s with persona response (Priya Sundaram), 3 claims extracted, 2 belief changes. Turn 2 (CAC contradiction) completed in 14.9s. CONTRADICTION DETECTED with HIGH severity: 'Founder claimed CAC of Rs 200, but actual spend of Rs 20,000 / 50 customers = Rs 400 actual CAC, exactly double the stated CAC. This is a direct mathematical contradiction.' Economics belief dropped from 6→3 (Priya), also dropped for Richard 5→3. Transcript persisted (4 messages), claims persisted (5 total). LLM integration working perfectly with new model."
   - task: "End pitch deliberation (/api/pitch/end) - verdict, gaps, scorecard"
     implemented: true
     working: true
@@ -189,6 +204,9 @@ backend:
         - working: true
           agent: "testing"
           comment: "✅ TESTED: Deliberation completed in 47.8s. Verdict: 'Pass' (valid label), final_score: 22/100, confidence: 72%. Gaps: 7 total (3 P0, 3 P1, 1 P2) with valid severities. Scorecard: 10 dimensions with scores and reasons. Session status changed to 'ended'. All structure correct."
+        - working: true
+          agent: "testing"
+          comment: "✅ RETESTED (post-recovery, NEW MODEL claude-sonnet-4-5-20250929): Deliberation completed in 55.3s. Verdict: 'Pass' (valid label), final_score: 28/100, confidence: 85%. Gaps: 8 total (4 P0, 3 P1, 1 P2) with valid severities. Scorecard: 10 dimensions with scores and reasons. Session status changed to 'ended'. All structure correct. LLM deliberation working perfectly with new model."
   - task: "Gap status update (/api/gaps/update)"
     implemented: true
     working: true
@@ -272,9 +290,43 @@ frontend:
         - working: "NA"
           agent: "main"
           comment: "Client-side view router restyled to exact Mintlify light theme. User approved automated frontend testing of full flow."
+        - working: false
+          agent: "user"
+          comment: "User reported: 'The buttons of the website are not working.' Root cause identified by main: container came up with missing .env + uninstalled node_modules, so nextjs was STOPPED — the app was down when user tested (buttons render but page non-interactive/erroring). Main recovered: recreated .env, yarn install, restarted nextjs, switched blocked LLM model. Automated screenshot verification shows 'Get started' now navigates to login on both localhost and external preview URL, elementFromPoint confirms button is topmost (no overlay), no hydration/page errors. Needs full frontend button-click verification across all views."
         - working: true
           agent: "testing"
           comment: "✅ COMPLETE E2E TEST PASSED! Full happy-path flow verified: (1) Landing page - hero heading 'The AI investment committee founders build on', Get started button, Stress test my pitch nav button, How it works section, 3 panel cards all visible. (2) Login - pre-filled credentials (test@example.com/password123) working. (3) Dashboard - loaded with existing startup data. (4) Onboarding - all 4 steps completed (Identity: PayFlow India/Rajesh Kumar/Fintech/Seed, Problem: merchants struggle with payments, Business: CAC Rs 200 + 50 customers, Market: Rs 4000 crore). (5) Panel selection - 3 panels visible, selected VC Investment Committee. (6) Pitch room - timer, AI SIMULATION badge, End pitch button, 3 persona cards with confidence numbers (50) and progress bars all working. (7) Turn 1 - sent initial pitch message, persona (Priya Sundaram) responded successfully with follow-up question and belief chips. (8) Turn 2 CRITICAL TEST - sent contradiction message 'spent Rs 20,000 for 50 customers' vs stated 'CAC Rs 200'. CONTRADICTION DETECTED! Red alert box appeared with 'Contradiction · HIGH: Rs 20,000 / 50 customers = Rs 400 per customer, not the Rs 200 CAC originally claimed.' 9 belief-drop chips displayed showing Unit Economics 5→3, Founder Credibility drops. Confidence numbers on persona cards changed (Richard 50→48, Priya 50→50, James 50→49). (9) End pitch - deliberation completed successfully. (10) Debrief - score 18/100, verdict 'Pass', Strongest: Problem Severity, Weakest: Unit Economics displayed correctly. (11) Tabs - Gaps & Scorecard: 8 gaps with P0/P1/P2 severity labels, 10-dimension scorecard with progress bars. Panel Deliberation: Consensus/disagreements/conditions/unresolved sections visible. Transcript: 7 messages (founder + persona exchanges) displayed correctly. (12) Gap resolution - clicked 'Mark resolved' on P0 gap, status changed to 'Resolved' successfully. NO CRITICAL CONSOLE ERRORS. The core 'aha moment' (contradiction detection + belief-drop visualization) is working perfectly. Mintlify light theme styling looks excellent. All UI elements rendering correctly."
+        - working: true
+          agent: "testing"
+          comment: "✅ BUG FIX VERIFIED - ALL BUTTONS WORKING (20/20 TESTED)! Comprehensive button-click verification completed across all views as requested by user. LANDING PAGE (7/7): 'Get started' → Login ✅, 'Stress test my pitch' → Login ✅, 'Sign in' → Login ✅, 'See how it works' → scrolls to #how ✅, 'Product' nav → scrolls ✅, 'Panels' nav → scrolls ✅, 'How it works' nav → scrolls ✅. LOGIN (1/1): 'Sign in' with pre-filled credentials → Dashboard ✅. DASHBOARD (3/3): 'New startup' → Onboarding ✅, 'Pitch now'/'Re-pitch' → Panel Selection ✅, Logout icon → Landing ✅. ONBOARDING (3/3): 'Continue' → next step ✅, 'Back' → previous step ✅, 'Choose panel' → Panel Selection ✅. PANELS (1/1): 'Pitch this panel' → Pitch Room ✅. PITCH ROOM (2/2): Voice toggle button responds ✅, 'End pitch' button visible & enabled ✅. DEBRIEF (3/3): 'Latest debrief' → Debrief ✅, 'Re-pitch' → Panel Selection ✅, 'Back to Studio' → Dashboard ✅. User's bug report 'the buttons of the website are not working' is RESOLVED. Root cause was app down (missing .env + node_modules), now fixed. All buttons respond to clicks and cause expected view/state changes. No console errors detected. App fully functional."
+          comment: "User's bug report 'the buttons of the website are not working' is RESOLVED. Root cause was app down (missing .env + node_modules), now fixed. All buttons respond to clicks and cause expected view/state changes. No console errors detected. App fully functional."
+
+  - task: "Audio-first Pitch Room: continuous mic + live real-time transcription (no chat UI)"
+    implemented: true
+    working: true
+    file: "app/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "UPGRADED STT/TTS to Deepgram (user request: native Web Speech was not recognizing speech / no live transcription; wants low latency + clean output). STT: browser captures mic via getUserMedia + MediaRecorder (250ms webm/opus chunks) and streams to Deepgram wss://api.deepgram.com/v1/listen (model nova-3, interim_results, endpointing 300, utterance_end_ms 1000) authed by /api/deepgram/token. Live interim+final transcript rendered in real time; auto-submits a turn on speech_final/UtteranceEnd. Mic stays on for the whole conversation: on each turn the socket is closed during thinking/TTS then re-opened automatically (mediaStream persists so no re-permission). TTS: panel reply synthesized via /api/deepgram/tts Aura-2 voices (distinct per persona: orpheus/thalia/arcas) and played as audio, then mic auto-resumes. Removed native SpeechRecognition + speechSynthesis. Compiles clean, room renders. NOTE: real ASR accuracy/latency can only be confirmed in a real browser with a mic; automated test must mock getUserMedia/MediaRecorder/WebSocket/Audio and inject fake Deepgram Results to verify the loop wiring."
+        - working: "NA"
+          agent: "main"
+          comment: "Redesigned PitchRoomView per user request. (1) MIC STAYS ON for the whole conversation: SpeechRecognition continuous=true with auto-restart on onend while phase==='listening'; mic pauses only during the panel's spoken reply (echo avoidance) then auto-resumes. Previously continuous=false made mic stop after one utterance. (2) NO CHAT UI: removed chat bubbles + textarea/send. Audio-first now: interim speech shows as live transcription in real time; on ~1.7s pause the final text auto-submits as a turn; panel reply is spoken aloud (distinct per-persona voice via VOICE_PROFILES) and shown as a caption via new PitchCaption; then mic auto-resumes. TTS on by default. Central mic control with phase status. Typed fallback only when SpeechRecognition unsupported. Backend unchanged. Screenshot verified UI renders, no page errors."
+        - working: "NA"
+          agent: "main"
+          comment: "FIX for auto-resume bug found by testing agent (mic went OFF after panel reply): resumeListening() now re-affirms micOnRef.current=true + setMicOn(true) + setListening(true) so the UI mic state is driven by the conversation source-of-truth. Verified empirically via HMR-safe mock (delegates non-deepgram WebSockets): after a full turn the status returns to 'Listening', the Deepgram socket reopens (wscount 1->2), mic button stays green, and the panel reply renders as a caption with belief chips. Please formally re-verify B5 (auto-resume) and C (2nd turn continuous loop)."
+        - working: true
+          agent: "testing"
+          comment: "✅ BUG FIX VERIFIED - BOTH ISSUES RESOLVED! Comprehensive audio-first pitch room testing completed with mocked SpeechRecognition API. (A) NO CHAT UI CONFIRMED: Textarea count=0, send button count=0, central mic button exists with 'Tap to start the conversation' text, 3 persona cards visible, End pitch button present. Audio-first interface is in place. (B1) MIC TURNS ON: Clicked mic button, status changed to 'Listening — just speak, pause when you're done', 'Mic stays on for the whole conversation' hint visible. (B2) LIVE TRANSCRIPTION WORKING: Emitted interim speech 'We are a payments app with fifty paying customers', live text appeared in real time with 'You · speaking' label in green. (B3) AUTO-SUBMIT + PANEL REPLY CAPTIONS: Emitted final result, auto-submit triggered after ~2.5s, founder caption 'You' added, panel reply from Rajiv Malhotra appeared as a caption (NOT chat bubble) with avatar, name, role, response text in rounded card. 3 belief change chips visible (Unit Economics 5→6, Distribution 5→6, Feasibility 5→6). Persona confidence numbers updated from 50→51. (B4) MIC AUTO-RESUMES: After panel reply + TTS, mic button remained green, status shows 'Listening — just speak, pause when you're done', 'Mic stays on' hint still visible. Screenshot confirms mic auto-resumed and stayed ON. (B5) CONTINUOUS LOOP: Mic continues listening for subsequent turns. (C) PERSONA UPDATES: Confidence numbers changed, belief chips displayed. No critical console errors. BOTH USER-REPORTED BUGS FIXED: (1) Mic now stays ON for the full conversation with continuous=true + auto-restart. (2) Chat UI removed, replaced with audio-first interface: live transcription, auto-submit on pause, panel replies as spoken captions. The core 'audio conversation' experience is working perfectly."
+        - working: false
+          agent: "testing"
+          comment: "❌ CRITICAL BUG FOUND - MIC AUTO-RESUME NOT WORKING! Deepgram voice integration test completed with mocked media/WebSocket/Audio layer. PASSING: (A) Audio-first UI ✅ - No textarea, no send button, central mic button with 'Tap to start the conversation', 3 persona cards (Rajiv Malhotra, Zara Chen, Diego Navarro), End pitch button all present. (B1) Mic on + socket ✅ - Clicked mic, status changed to 'Listening — just speak, pause when you're done', window.__dgws exists (STT socket opened). (B2) Live transcription ✅ - Emitted interim 'we have fifty paying customers', 'You · speaking' label appeared with live text. (B3) Auto-submit ✅ - Emitted final 'we have fifty paying customers and our CAC is two hundred rupees' with speech_final=true. (B4) Panel reply + TTS ✅ - Founder caption 'You' appeared, panel reply from Rajiv Malhotra rendered as caption (NOT chat bubble) with avatar/name/role/response text in rounded card. Response: '₹200 CAC sounds attractive on paper, Jane. But in payments, customer a...'. Confidence numbers updated: 51, 51, 50. /api/deepgram/tts endpoint called (TTS working). (D) No critical console errors ✅. FAILING: (B5) Mic auto-resume ❌ - CRITICAL ISSUE: After panel reply + TTS, mic button changed from GREEN to BLACK, status text changed from 'Listening' to 'Tap to start the conversation'. The mic did NOT auto-resume. window.__dgws still exists (new socket created) but micOn state is false. Screenshots confirm mic button is OFF. (C) Turn 2 ⚠️ PARTIAL - Emitted 2nd final result 'actually we spent twenty thousand rupees to acquire those fifty customers', but only 1 panel reply found (expected 2). The 2nd turn was not processed because the mic didn't auto-resume, so the 2nd message was never sent to the backend. ROOT CAUSE: The resumeListening() function (lines 705-711) is called after TTS completes in speakThen() (line 714), but the mic button state (micOn) is not being set to true, causing the mic to turn off. The core requirement 'mic stays on for the whole conversation' is NOT working. The continuous loop is broken."
+        - working: true
+          agent: "testing"
+          comment: "✅✅✅ MIC AUTO-RESUME BUG FIX VERIFIED - ALL TESTS PASSED! Re-tested with HMR-safe mocking (delegates non-deepgram WebSockets to avoid Next.js crashes). STEP 1 ✅: Clicked mic button (button.w-16), status changed to 'Listening', window.__wscount = 1 (STT socket opened). STEP 2 ✅: Emitted interim 'we have fifty paying customers', live 'You · speaking' caption appeared. STEP 3 ✅: Emitted final 'we have fifty paying customers and CAC is two hundred rupees' with speech_final=true, waited 25s for panel reply. STEP 4 ✅: Founder caption 'You' + panel reply from Rajiv Malhotra appeared with avatar/name/role/response text, 3 belief chips visible (Unit Economics 5→6, Distribution 5→6, Feasibility 5→6), confidence numbers updated to 51. STEP 5 ✅✅✅ CRITICAL FIX VERIFIED: After panel reply + TTS (waited 5s), status returned to 'Listening — just speak…', window.__wscount = 2 (STT socket reopened), mic button background color rgb(21, 196, 106) = GREEN. The mic AUTO-RESUMED correctly! STEP 6 ✅: Emitted 2nd final 'actually we spent twenty thousand rupees to acquire those fifty customers', waited 25s. 2nd founder caption + 2nd panel reply appeared, CONTRADICTION DETECTED (red alert box: '₹20,000 / 50 customers = ₹400 actual CAC, not the claimed ₹200. This is a 2x discrepancy'), window.__wscount = 3 (socket reopened again), status still 'Listening'. The continuous loop is working perfectly. No critical console errors. The fix (resumeListening() re-affirms micOnRef.current=true + setMicOn(true) + setListening(true)) successfully resolves the bug. The mic now stays on for the whole conversation as required."
 
 metadata:
   created_by: "main_agent"
@@ -290,7 +342,7 @@ test_plan:
 
 agent_communication:
     - agent: "main"
-      message: "Phase 1 backend complete for the core loop. Please test all backend endpoints. Focus especially on the LLM engine: (1) /api/pitch/turn must return a valid persona_message + belief changes; (2) test the derived-numeric contradiction scenario (CAC Rs200 vs Rs20000/50=Rs400) end-to-end and confirm a contradiction is detected and Unit Economics belief drops; (3) /api/pitch/end must return a verdict with final_score, gaps (P0/P1/P2) and a 10-dimension scorecard. Auth is test@example.com/password123. Create a user via login first, then a startup, then a session, then run 2-3 turns, then end. All IDs are UUID strings. Do NOT modify the Testing Protocol section."
+      message: "RECOVERY + RETEST (new session): Container came up with missing .env and node_modules. Recreated /app/.env (MONGO_URL, DB_NAME=echoclash, EMERGENT_LLM_KEY, INTEGRATION_PROXY_URL, CORS_ORIGINS, NEXT_PUBLIC_BASE_URL) and ran yarn install. IMPORTANT CHANGE: the previously configured LLM model 'claude-opus-4-6' is now blocked (model_not_available_on_free_plan / insufficient credits). Switched LLM_MODEL to 'claude-sonnet-4-5-20250929' (verified available via proxy) in both .env and the route.js fallback. Please RETEST all backend endpoints, focusing on the LLM engine: (1) /api/pitch/turn returns valid persona_message + belief changes; (2) the derived-numeric CAC contradiction scenario (CAC Rs200 vs Rs20000/50=Rs400) is detected and Unit Economics belief drops; (3) /api/pitch/end returns verdict + final_score + gaps(P0/P1/P2) + 10-dim scorecard. Auth: test@example.com/password123. All IDs are UUID strings. Do NOT modify the Testing Protocol section."
     - agent: "testing"
       message: "✅ ALL BACKEND TESTS PASSED (7/7). Complete happy-path flow tested successfully: Auth (login + wrong password), Panels (3 panels, 9 personas, 10 dimensions), Startups CRUD (create/list/get), Sessions (create with initial beliefs, get with startup+personas), Pitch Turn LLM (CRITICAL: CAC contradiction Rs200 vs Rs400 detected with HIGH severity, economics belief dropped 6→4, transcript persisted), End Pitch LLM (verdict='Pass', score=22/100, 7 gaps with P0/P1/P2, 10-dimension scorecard, session status='ended'), Gap Update (status changed to RESOLVED). LLM integration working perfectly (Claude Opus 4-6 via Emergent proxy, response times 12-48s). No major issues found. Backend is production-ready."
     - agent: "testing"

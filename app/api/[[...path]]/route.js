@@ -34,7 +34,7 @@ async function callLLM(messages, { maxTokens = 2200, temperature = 0.7 } = {}) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: process.env.LLM_MODEL || 'claude-opus-4-6',
+      model: process.env.LLM_MODEL || 'claude-sonnet-4-5-20250929',
       messages,
       max_tokens: maxTokens,
       temperature,
@@ -299,6 +299,47 @@ async function handleRoute(request, { params }) {
 
     // health
     if (route === '/' || route === '/root') return json({ message: 'EchoClash API' })
+
+    // ---- DEEPGRAM: browser STT auth. Prefer a short-lived scoped token (secure).
+    //      Falls back to the raw key via the browser 'token' subprotocol if the key
+    //      lacks permission to mint tokens (prototype only). ----
+    if (route === '/deepgram/token' && method === 'GET') {
+      if (!process.env.DEEPGRAM_API_KEY) return json({ error: 'deepgram_not_configured' }, 500)
+      try {
+        const dg = await fetch('https://api.deepgram.com/v1/auth/grant', {
+          method: 'POST',
+          headers: { Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ttl_seconds: 60 }),
+          cache: 'no-store',
+        })
+        const b = await dg.json().catch(() => ({}))
+        if (dg.ok && b.access_token) return json({ token: b.access_token, expiresIn: b.expires_in, mode: 'bearer' })
+      } catch (e) { /* fall through to raw-key fallback */ }
+      return json({ key: process.env.DEEPGRAM_API_KEY, mode: 'token' })
+    }
+
+    // ---- DEEPGRAM: TTS (Aura-2 high quality voices) ----
+    if (route === '/deepgram/tts' && method === 'POST') {
+      if (!process.env.DEEPGRAM_API_KEY) return json({ error: 'deepgram_not_configured' }, 500)
+      const body = await request.json().catch(() => ({}))
+      const text = String(body?.text || '').trim()
+      const ALLOWED = new Set(['aura-2-thalia-en', 'aura-2-orpheus-en', 'aura-2-helios-en', 'aura-2-andromeda-en', 'aura-2-arcas-en', 'aura-2-aurora-en'])
+      const model = ALLOWED.has(body?.model) ? body.model : 'aura-2-thalia-en'
+      if (!text) return json({ error: 'text required' }, 400)
+      const clipped = text.slice(0, 1800)
+      const dg = await fetch(`https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}&encoding=mp3`, {
+        method: 'POST',
+        headers: { Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: clipped }),
+      })
+      if (!dg.ok) { const t = await dg.text().catch(() => ''); return json({ error: 'deepgram_tts_failed', detail: t.slice(0, 200) }, dg.status) }
+      const buf = await dg.arrayBuffer()
+      const res = new NextResponse(buf, { status: 200 })
+      res.headers.set('Content-Type', dg.headers.get('content-type') || 'audio/mpeg')
+      res.headers.set('Cache-Control', 'no-store')
+      res.headers.set('Access-Control-Allow-Origin', process.env.CORS_ORIGINS || '*')
+      return res
+    }
 
     // ---- AUTH (dev bypass) ----
     if (route === '/auth/login' && method === 'POST') {

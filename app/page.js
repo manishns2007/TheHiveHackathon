@@ -567,6 +567,12 @@ function PanelsView({ user, go, startup }) {
 
 // ================================================================== PITCH ROOM
 const STATUS_MSGS = ['Analyzing your claims...', 'Cross-checking evidence...', 'Updating investor beliefs...', 'The panel is forming a response...']
+// Distinct voice profiles per panel seat (index-based) for spoken persona replies
+const VOICE_PROFILES = [
+  { rate: 0.97, pitch: 0.82 },
+  { rate: 1.07, pitch: 1.14 },
+  { rate: 0.99, pitch: 1.0 },
+]
 
 function PitchRoomView({ user, go, sessionId }) {
   const [session, setSession] = useState(null)
@@ -700,6 +706,7 @@ function PitchRoomView({ user, go, sessionId }) {
     else if (phase === 'listening') stopListening()
     else if (phase === 'speaking') skipSpeaking()
   }
+  submitRef.current = submitTurn
 
   const endPitch = async () => {
     if (transcript.filter((m) => m.role === 'founder').length === 0) { toast.error('Give at least part of your pitch first.'); return }
@@ -837,6 +844,55 @@ function PitchRoomView({ user, go, sessionId }) {
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+function PitchCaption({ m, personas, speaking }) {
+  if (m.role === 'founder') {
+    return (
+      <div className="flex flex-col items-start">
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 mb-1">You</span>
+        <p className="text-[17px] leading-relaxed text-neutral-800 max-w-2xl whitespace-pre-wrap">{m.content}</p>
+      </div>
+    )
+  }
+  const persona = personas.find((p) => p.id === m.persona_id)
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`rounded-2xl border p-4 transition-all ${speaking ? 'border-emerald-300 bg-emerald-50/40 shadow-[0_0_0_3px_rgba(34,197,94,0.10)]' : 'border-neutral-200 bg-[#f7f8f4]'}`}>
+      <div className="flex items-center gap-2.5 mb-2">
+        <img src={m.avatar_url || persona?.avatar_url} alt={m.personaName} className="w-8 h-8 rounded-full object-cover border border-neutral-200" />
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="text-sm font-semibold text-neutral-900 truncate">{m.personaName}</span>
+          <span className="text-[11px] text-neutral-500 truncate">{m.personaRole}</span>
+        </div>
+        {speaking && <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-brand shrink-0"><Volume2 className="w-3 h-3" /> speaking</span>}
+      </div>
+      <p className="text-[17px] leading-relaxed text-neutral-800 whitespace-pre-wrap">{m.content}</p>
+      {m.question?.text && (
+        <div className="mt-3 pt-3 border-t border-neutral-200 text-[15px] text-neutral-900 flex gap-2">
+          <Target className="w-4 h-4 shrink-0 mt-0.5 text-brand" /> {m.question.text}
+        </div>
+      )}
+      {(m.contradictions || []).map((c, i) => (
+        <div key={i} className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 flex gap-2">
+          <ShieldAlert className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+          <div><div className="text-xs font-semibold text-red-700">Contradiction · {c.severity}</div><div className="text-xs text-red-600/80 mt-0.5">{c.explanation}</div></div>
+        </div>
+      ))}
+      {(m.beliefChanges || []).length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {m.beliefChanges.map((b, i) => {
+            const down = b.new < b.previous
+            return (
+              <span key={i} className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border ${down ? 'border-red-200 text-red-700 bg-red-50' : 'border-emerald-200 text-emerald-700 bg-emerald-50'}`}>
+                {down ? <TrendingDown className="w-3 h-3" /> : <TrendingUp className="w-3 h-3" />}
+                {DIM_LABELS[b.dimension] || b.dimension} {b.previous}→{b.new}
+              </span>
+            )
+          })}
+        </div>
+      )}
+    </motion.div>
   )
 }
 

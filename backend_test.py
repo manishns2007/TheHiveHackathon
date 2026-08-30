@@ -9,7 +9,7 @@ import time
 import sys
 
 # Base URL from .env
-BASE_URL = "https://pitch-stress-test.preview.emergentagent.com/api"
+BASE_URL = "https://42b1e621-4ce6-4896-a47f-bd5b4d4a8fcd.preview.emergentagent.com/api"
 
 # Test data
 TEST_USER = {"email": "test@example.com", "password": "password123"}

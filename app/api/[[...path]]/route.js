@@ -34,7 +34,7 @@ async function callLLM(messages, { maxTokens = 2200, temperature = 0.7 } = {}) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: process.env.LLM_MODEL || 'claude-opus-4-6',
+      model: process.env.LLM_MODEL || 'claude-sonnet-4-5-20250929',
       messages,
       max_tokens: maxTokens,
       temperature,

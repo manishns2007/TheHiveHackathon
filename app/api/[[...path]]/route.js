@@ -146,11 +146,14 @@ function buildTurnUser(session, startup, founderMessage, kind) {
     return `${m.personaName} (${m.personaRole}): ${m.content}${m.question?.text ? ' Q: ' + m.question.text : ''}`
   }).join('\n') || '  (pitch just started)'
 
-  const kindLine = kind === 'pitch'
-    ? `THIS MESSAGE IS THE FOUNDER'S COMPLETE OPENING PITCH — they have finished pitching uninterrupted. Do not summarize it back. Extract claims, then have the single most relevant persona ask their FIRST, most important question, grounded strictly in what the founder actually pitched.`
-    : `THIS MESSAGE IS THE FOUNDER'S ANSWER to the panel's last question. Ask ONE focused follow-up that builds on this answer and the pitch. Do NOT repeat any question already asked (see QUESTIONS ALREADY ASKED below).`
+  let memoryBlock = ''
+  if (session.memory && (session.memory.claims?.length || session.memory.gaps?.length)) {
+    const mClaims = (session.memory.claims || []).slice(0, 25).map((c) => `- ${c}`).join('\n') || '  (none)'
+    const mGaps = (session.memory.gaps || []).map((g) => `- [${g.severity} ${g.category}] ${g.why_it_matters} (${g.status})`).join('\n') || '  (none)'
+    memoryBlock = `\nMEMORY FROM PRIOR PITCH ROUNDS (this is round ${session.round_number}; the panel REMEMBERS these):\nPrior claims:\n${mClaims}\nPrior gaps (note which are now resolved vs still open):\n${mGaps}\nLast round score: ${session.memory.last_score ?? 'n/a'}\n`
+  }
 
-  return `STARTUP MEMORY:\n${startupMemory(startup)}\nPRIOR CLAIMS:\n${priorClaims}\n\nOPEN CONTRADICTIONS:\n${contradictions}\n\nQUESTIONS ALREADY ASKED (never repeat these):\n${askedQuestions}\n\nCURRENT BELIEF SCORES (persona: dim=score):\n${beliefs}\n\nCONVERSATION SO FAR:\n${transcript}\n\n${kindLine}\n\nFOUNDER JUST SAID:\n"""${founderMessage}"""\n\nProcess this turn now. Return the JSON object.`
+  return `STARTUP MEMORY:\n${startupMemory(startup)}${memoryBlock}\nPRIOR CLAIMS (this session):\n${priorClaims}\n\nOPEN CONTRADICTIONS:\n${contradictions}\n\nCURRENT BELIEF SCORES (persona: dim=score):\n${beliefs}\n\nCONVERSATION SO FAR:\n${transcript}\n\nFOUNDER JUST SAID:\n"""${founderMessage}"""\n\nProcess this turn now. Return the JSON object.`
 }
 
 function deliberationSystem(panel) {
@@ -165,6 +168,136 @@ function buildDeliberationUser(session, startup) {
   const beliefs = Object.entries(session.beliefs || {}).map(([pid, dims]) => `  ${pid}: ` + DIM_KEYS.map((k) => `${k}=${dims[k]}`).join(' ')).join('\n')
   const transcript = (session.transcript || []).map((m) => m.role === 'founder' ? `FOUNDER: ${m.content}` : `${m.personaName}: ${m.content}${m.question?.text ? ' Q: ' + m.question.text : ''}`).join('\n')
   return `STARTUP:\n${startupMemory(startup)}\nCLAIMS:\n${claims}\n\nCONTRADICTIONS:\n${contradictions}\n\nFINAL BELIEF SCORES:\n${beliefs}\n\nFULL TRANSCRIPT:\n${transcript}\n\nDeliberate and return the JSON verdict + gaps + scorecard now.`
+}
+
+// ---------- Rewrite ----------
+const PITCH_SECTIONS = ['opening', 'problem', 'customer', 'solution', 'market', 'traction', 'business_model', 'differentiation', 'moat', 'gtm', 'team', 'ask', 'closing']
+const LENGTH_LABELS = { '60s': '60-second', '90s': '90-second', '2min': '2-minute', '5min': '5-minute', 'custom': 'concise' }
+
+function rewriteSystem(lengthKey) {
+  const label = LENGTH_LABELS[lengthKey] || 'concise'
+  return `You are an expert startup pitch writer for EchoClash. Rewrite the founder's pitch so it directly addresses the investment panel's objections and the selected gaps, tuned for a ${label} spoken pitch.
+
+STRICT HONESTY RULES:
+- NEVER invent customers, revenue, traction, statistics, evidence, partnerships, or numbers that are not present in the startup memory or the transcript.
+- Where evidence is missing but needed, insert a bracketed placeholder EXACTLY like [INSERT: your customer acquisition cohort data here].
+- Any claim that is currently unsupported must be rephrased honestly or flagged.
+- The founder is the final author; be specific and credible, never generic.
+
+Money is INR (\u20b9). Return ONLY one valid minified JSON object, no markdown, exactly this shape:
+{"title":"","sections":{"opening":"","problem":"","customer":"","solution":"","market":"","traction":"","business_model":"","differentiation":"","moat":"","gtm":"","team":"","ask":"","closing":""},"flagged":[{"text":"","reason":""}]}
+Each section is one short paragraph (empty string if genuinely not applicable). "flagged" lists any lines that rest on unproven claims the founder must verify.`
+}
+
+function buildRewriteUser(session, startup, gaps) {
+  const v = session.verdict
+  const gapText = (gaps || []).map((g) => `- [${g.severity} ${g.category}] ${g.why_it_matters} -> action: ${g.recommended_action}${g.required_evidence ? ' | evidence needed: ' + g.required_evidence : ''}`).join('\n') || '  (none selected)'
+  const objections = (session.transcript || []).filter((m) => m.role === 'persona').map((m) => `- ${m.personaName}: ${m.question?.text || m.content}`).slice(0, 10).join('\n')
+  const claims = (session.claims || []).map((c) => `- [${c.category}] ${c.text} [${c.evidence_status}]`).join('\n') || '  (none)'
+  return `STARTUP MEMORY:\n${startupMemory(startup)}\nPANEL VERDICT: ${v ? v.verdict + ' (score ' + v.final_score + ')' : 'n/a'}\n\nGAPS TO ADDRESS:\n${gapText}\n\nPANEL OBJECTIONS / QUESTIONS:\n${objections}\n\nKNOWN CLAIMS + EVIDENCE STATUS:\n${claims}\n\nWrite the rewritten pitch now. Return the JSON object.`
+}
+
+// ---------- Demo (FlowPay scripted, zero external calls) ----------
+const DEMO_SCORECARD_1 = [
+  { dimension: 'problem', score: 7, reason: 'Clear, real pain for small merchants accepting digital payments.' },
+  { dimension: 'market', score: 4, reason: '\u20b94,000cr TAM asserted top-down with no methodology.' },
+  { dimension: 'founder', score: 5, reason: 'Credible but numbers slipped under questioning.' },
+  { dimension: 'differentiation', score: 5, reason: 'Faster settlement is a feature, not yet a wedge.' },
+  { dimension: 'defensibility', score: 4, reason: 'Merchant relationships are not a durable moat yet.' },
+  { dimension: 'distribution', score: 4, reason: 'Only paid acquisition shown; no repeatable channel.' },
+  { dimension: 'economics', score: 3, reason: 'CAC contradiction: \u20b920,000/50 = \u20b9400, not \u20b9200.' },
+  { dimension: 'scalability', score: 6, reason: 'UPI rails scale, execution unproven at volume.' },
+  { dimension: 'novelty', score: 5, reason: 'Crowded UPI space; incremental novelty.' },
+  { dimension: 'feasibility', score: 6, reason: 'Product exists and works for 50 merchants.' },
+]
+const DEMO_SCORECARD_2 = [
+  { dimension: 'problem', score: 7, reason: 'Problem re-confirmed with sharper ICP.' },
+  { dimension: 'market', score: 5, reason: 'Bottom-up TAM now shown, still needs sourcing.' },
+  { dimension: 'founder', score: 6, reason: 'Corrected CAC openly with cohort data \u2014 credibility up.' },
+  { dimension: 'differentiation', score: 6, reason: 'Settlement speed tied to measurable merchant value.' },
+  { dimension: 'defensibility', score: 5, reason: 'Early network effects between merchants emerging.' },
+  { dimension: 'distribution', score: 6, reason: 'Referral loop within merchant clusters shown.' },
+  { dimension: 'economics', score: 6, reason: 'CAC reconciled to \u20b9400 with a path to \u20b9250.' },
+  { dimension: 'scalability', score: 6, reason: 'Unchanged; volume still to prove.' },
+  { dimension: 'novelty', score: 5, reason: 'Unchanged.' },
+  { dimension: 'feasibility', score: 7, reason: 'Retention data now provided.' },
+]
+
+function demoBeliefs(scorecard) {
+  const vc = getPanel('vc')
+  const b = {}
+  for (const p of vc.personas) { b[p.id] = {}; for (const k of DIM_KEYS) b[p.id][k] = scorecard.find((s) => s.dimension === k)?.score ?? 5 }
+  return b
+}
+
+function buildDemoSession1(startup_id, user_id) {
+  const now = Date.now()
+  const t = (i) => new Date(now - (60000 * (20 - i)))
+  const transcript = [
+    { id: uuidv4(), role: 'founder', content: 'FlowPay is a UPI-based B2B payments platform for small merchants in India. The market is huge \u2014 about \u20b94,000 crore. Our CAC is just \u20b9200 and we already have 50 paying merchants.', ts: t(1) },
+    { id: uuidv4(), role: 'persona', persona_id: 'richard', personaName: 'Richard Harmon', personaRole: 'Market Skeptic', content: '\u20b94,000 crore is a headline, not a market. Walk me through how you built that number \u2014 top-down slices of "UPI in India" are worthless to me.', question: { text: 'What is your bottom-up TAM: number of target merchants \u00d7 realistic revenue per merchant?', target_dimension: 'market', escalation_level: 'challenge' }, contradictions: [], beliefChanges: [{ persona_id: 'richard', dimension: 'market', previous: 5, new: 4, reason: 'TAM asserted top-down with no methodology.' }], ts: t(2) },
+    { id: uuidv4(), role: 'founder', content: 'We got those first 50 merchants by spending around \u20b920,000 last quarter on acquisition.', ts: t(3) },
+    { id: uuidv4(), role: 'persona', persona_id: 'priya', personaName: 'Priya Sundaram', personaRole: 'Economics Auditor', content: 'Stop right there. \u20b920,000 divided by 50 merchants is \u20b9400 per acquisition \u2014 that is double the \u20b9200 CAC you opened with. Which number is real?', question: { text: 'Give me the actual blended CAC with the spend and the cohort it acquired.', target_dimension: 'economics', escalation_level: 'cross_reference' }, contradictions: [{ id: uuidv4(), severity: 'HIGH', conflict_type: 'derived_numeric', new_claim: 'Spent \u20b920,000 to acquire 50 merchants', prior_claim: 'CAC is \u20b9200', affected_dimensions: ['economics', 'founder'], explanation: '\u20b920,000 / 50 merchants = \u20b9400 actual CAC, not the \u20b9200 claimed \u2014 a 2x understatement.' }], beliefChanges: [{ persona_id: 'priya', dimension: 'economics', previous: 5, new: 3, reason: 'CAC understated by 2x under scrutiny.' }, { persona_id: 'priya', dimension: 'founder', previous: 5, new: 4, reason: 'Headline numbers did not reconcile.' }], ts: t(4) },
+    { id: uuidv4(), role: 'founder', content: 'Fair \u2014 blended CAC is closer to \u20b9400 right now. Our moat is our merchant relationships and faster settlement times.', ts: t(5) },
+    { id: uuidv4(), role: 'persona', persona_id: 'james', personaName: 'James Wei', personaRole: 'Moat Investor', content: 'Relationships and speed are features a funded competitor copies in a quarter. I need switching costs or a compounding advantage, not goodwill.', question: { text: 'What structurally stops a merchant from leaving for a faster/cheaper rail next month?', target_dimension: 'defensibility', escalation_level: 'challenge' }, contradictions: [], beliefChanges: [{ persona_id: 'james', dimension: 'defensibility', previous: 5, new: 4, reason: 'No durable switching cost articulated.' }], ts: t(6) },
+  ]
+  const claims = [
+    { id: uuidv4(), startup_id, session_id: null, text: 'UPI-based B2B payments platform for small merchants', category: 'Product', numeric_value: null, unit: '', confidence: 'high', evidence_status: 'PARTIALLY_SUPPORTED', created_at: t(1) },
+    { id: uuidv4(), startup_id, session_id: null, text: 'Market is ~\u20b94,000 crore', category: 'Market', numeric_value: 4000, unit: 'crore INR', confidence: 'low', evidence_status: 'UNSUPPORTED', created_at: t(1) },
+    { id: uuidv4(), startup_id, session_id: null, text: 'CAC is \u20b9200', category: 'Unit Economics', numeric_value: 200, unit: 'INR', confidence: 'low', evidence_status: 'CONTRADICTED', created_at: t(1) },
+    { id: uuidv4(), startup_id, session_id: null, text: 'Spent \u20b920,000 acquiring 50 merchants', category: 'Unit Economics', numeric_value: 400, unit: 'INR CAC', confidence: 'high', evidence_status: 'SUPPORTED', created_at: t(3) },
+  ]
+  const contradictions = [transcript[3].contradictions[0]]
+  const gaps = [
+    { id: uuidv4(), session_id: null, startup_id, category: 'Unit Economics', severity: 'P0', panel_source: 'Priya Sundaram', transcript_evidence: '\u20b920,000 / 50 = \u20b9400 CAC vs \u20b9200 claimed', why_it_matters: 'Your headline CAC is understated 2x; every downstream LTV/payback number is now suspect.', recommended_action: 'Publish a real cohort: spend, merchants acquired, blended CAC, and payback period.', required_evidence: 'Quarterly acquisition spend + cohort size + retention curve', status: 'OPEN', created_at: t(4) },
+    { id: uuidv4(), session_id: null, startup_id, category: 'Distribution', severity: 'P1', panel_source: 'Richard Harmon', transcript_evidence: 'Only paid acquisition shown', why_it_matters: 'No repeatable, low-cost channel means CAC will rise as you scale.', recommended_action: 'Show one organic/referral channel with early conversion data.', required_evidence: 'Channel-level acquisition breakdown', status: 'OPEN', created_at: t(4) },
+    { id: uuidv4(), session_id: null, startup_id, category: 'Moat', severity: 'P1', panel_source: 'James Wei', transcript_evidence: '"moat is relationships and faster settlement"', why_it_matters: 'Features are copyable; without switching costs you have no defensibility.', recommended_action: 'Identify a compounding advantage (network effects, data, integrations).', required_evidence: 'Evidence of switching cost or network effect', status: 'OPEN', created_at: t(6) },
+    { id: uuidv4(), session_id: null, startup_id, category: 'Traction', severity: 'P2', panel_source: 'Priya Sundaram', transcript_evidence: 'No retention data offered', why_it_matters: 'Retention determines whether \u20b9400 CAC ever pays back.', recommended_action: 'Provide monthly merchant retention / churn.', required_evidence: 'Retention cohort table', status: 'OPEN', created_at: t(4) },
+  ]
+  const verdict = {
+    final_score: 61, previous_score: null, confidence: 64, verdict: 'Needs More Evidence',
+    consensus: ['The merchant pain is real and worth solving', 'The current numbers do not yet reconcile'],
+    disagreements: [{ topic: 'Upside', positions: 'Richard sees a modest market until TAM is proven; James is more open if a moat emerges.' }],
+    investment_conditions: ['A reconciled CAC with cohort data', 'One repeatable non-paid channel', 'A credible switching cost story'],
+    strongest_dimension: 'problem', weakest_dimension: 'economics',
+    unresolved_questions: ['What is the true blended CAC and payback?', 'What is the bottom-up TAM?', 'Why won\u2019t merchants churn to a cheaper rail?'],
+    created_at: t(7),
+  }
+  return {
+    id: uuidv4(), user_id, startup_id, panel_id: 'vc', panel_name: 'VC Investment Committee',
+    status: 'ended', mode: 'demo', round_number: 1, is_demo: true,
+    transcript: transcript.map((m) => ({ ...m })), claims, contradictions, beliefs: demoBeliefs(DEMO_SCORECARD_1),
+    belief_history: [], verdict, gaps, scorecard: DEMO_SCORECARD_1, started_at: t(0), ended_at: t(8),
+  }
+}
+
+function buildDemoSession2(startup_id, user_id) {
+  const now = Date.now()
+  const t = (i) => new Date(now - (60000 * (10 - i)))
+  const transcript = [
+    { id: uuidv4(), role: 'founder', content: 'Back again. Since last time: blended CAC is \u20b9400, and I can show the cohort \u2014 \u20b920,000 across 50 merchants last quarter, with 88% still active this quarter. Referrals inside merchant clusters now drive 30% of new signups at near-zero cost.', ts: t(1) },
+    { id: uuidv4(), role: 'persona', persona_id: 'priya', personaName: 'Priya Sundaram', personaRole: 'Economics Auditor', content: 'Thank you \u2014 that reconciles. \u20b9400 CAC with 88% retention gives a defensible payback. Now show me the path to \u20b9250 as referrals grow.', question: { text: 'What CAC do you model at 1,000 merchants and why?', target_dimension: 'economics', escalation_level: 'ask' }, contradictions: [], beliefChanges: [{ persona_id: 'priya', dimension: 'economics', previous: 3, new: 6, reason: 'CAC reconciled and retention provided.' }, { persona_id: 'priya', dimension: 'founder', previous: 4, new: 6, reason: 'Corrected numbers openly.' }], ts: t(2) },
+    { id: uuidv4(), role: 'persona', persona_id: 'richard', personaName: 'Richard Harmon', personaRole: 'Market Skeptic', content: 'The referral loop is the first real distribution signal I\u2019ve seen from you. Bottom-up TAM still needs a source, but this is progress.', question: { text: 'How many merchant clusters exist in your first two cities?', target_dimension: 'market', escalation_level: 'ask' }, contradictions: [], beliefChanges: [{ persona_id: 'richard', dimension: 'distribution', previous: 4, new: 6, reason: 'Referral channel shown with data.' }, { persona_id: 'richard', dimension: 'market', previous: 4, new: 5, reason: 'Bottom-up framing improved.' }], ts: t(3) },
+  ]
+  const gaps = [
+    { id: uuidv4(), session_id: null, startup_id, category: 'Moat', severity: 'P1', panel_source: 'James Wei', transcript_evidence: 'Referral loop emerging', why_it_matters: 'Network effects are forming but not yet proven durable.', recommended_action: 'Quantify cross-merchant network value and retention lift.', required_evidence: 'Cohort retention by referral vs paid', status: 'OPEN', created_at: t(3) },
+    { id: uuidv4(), session_id: null, startup_id, category: 'Market', severity: 'P2', panel_source: 'Richard Harmon', transcript_evidence: 'TAM still needs a source', why_it_matters: 'A sourced bottom-up TAM unlocks the venture-scale question.', recommended_action: 'Cite merchant counts per city from a credible source.', required_evidence: 'Bottom-up TAM with citations', status: 'OPEN', created_at: t(3) },
+  ]
+  const verdict = {
+    final_score: 74, previous_score: 61, confidence: 71, verdict: 'Conditional Interest',
+    consensus: ['CAC now reconciles and retention is strong', 'A real referral channel is emerging'],
+    disagreements: [{ topic: 'Moat', positions: 'James wants proof the network effect is durable; Priya is satisfied on economics.' }],
+    investment_conditions: ['Prove the referral loop is durable', 'Source the bottom-up TAM'],
+    strongest_dimension: 'feasibility', weakest_dimension: 'novelty',
+    unresolved_questions: ['Is the referral network effect durable at scale?', 'What is the sourced bottom-up TAM?'],
+    created_at: t(4),
+  }
+  return {
+    id: uuidv4(), user_id, startup_id, panel_id: 'vc', panel_name: 'VC Investment Committee',
+    status: 'ended', mode: 'demo', round_number: 2, is_demo: true,
+    transcript: transcript.map((m) => ({ ...m })), claims: [], contradictions: [], beliefs: demoBeliefs(DEMO_SCORECARD_2),
+    belief_history: [], verdict, gaps, scorecard: DEMO_SCORECARD_2, started_at: t(0), ended_at: t(5),
+  }
 }
 
 // ---------- Route ----------
@@ -294,11 +427,24 @@ async function handleRoute(request, { params }) {
       const startup = await db.collection('startups').findOne({ id: startup_id })
       if (!startup) return json({ error: 'startup not found' }, 404)
       const priorCount = await db.collection('sessions').countDocuments({ startup_id })
+      // build re-pitch memory from prior ended sessions
+      const priorSessions = await db.collection('sessions').find({ startup_id, status: 'ended' }).sort({ ended_at: 1 }).toArray()
+      let memory = null
+      if (priorSessions.length) {
+        const claimSet = new Set()
+        const gaps = []
+        for (const ps of priorSessions) {
+          for (const c of (ps.claims || [])) claimSet.add(`[${c.category}] ${c.text}${c.numeric_value != null ? ` (=${c.numeric_value}${c.unit || ''})` : ''}`)
+          for (const g of (ps.gaps || [])) gaps.push({ category: g.category, severity: g.severity, why_it_matters: g.why_it_matters, status: g.status })
+        }
+        const last = priorSessions[priorSessions.length - 1]
+        memory = { claims: Array.from(claimSet).slice(0, 40), gaps, last_score: last?.verdict?.final_score ?? null }
+      }
       const session = {
         id: uuidv4(), user_id: user_id || null, startup_id, panel_id,
         panel_name: panel.name, status: 'active', mode: 'live', round_number: priorCount + 1,
         transcript: [], claims: [], contradictions: [], beliefs: initialBeliefs(panel),
-        belief_history: [], verdict: null, gaps: [], scorecard: [],
+        belief_history: [], verdict: null, gaps: [], scorecard: [], memory,
         started_at: new Date(), ended_at: null,
       }
       await db.collection('sessions').insertOne(session)
@@ -482,6 +628,132 @@ async function handleRoute(request, { params }) {
         { $set: { 'gaps.$.status': status || 'RESOLVED' } }
       )
       return json({ ok: true })
+    }
+
+    // ---- AI REWRITE ----
+    if (route === '/rewrite' && method === 'POST') {
+      const body = await request.json()
+      const { session_id, gap_ids, length } = body || {}
+      if (!session_id) return json({ error: 'session_id required' }, 400)
+      const session = await db.collection('sessions').findOne({ id: session_id })
+      if (!session) return json({ error: 'session not found' }, 404)
+      const startup = await db.collection('startups').findOne({ id: session.startup_id })
+      const allGaps = session.gaps || []
+      let selected = allGaps.filter((g) => (gap_ids || []).includes(g.id))
+      if (!selected.length) selected = allGaps.filter((g) => g.severity === 'P0')
+      if (!selected.length) selected = allGaps
+
+      const messages = [
+        { role: 'system', content: rewriteSystem(length || '90s') },
+        { role: 'user', content: buildRewriteUser(session, startup, selected) },
+      ]
+      let result
+      try { result = await callLLMJson(messages, { maxTokens: 2600 }) }
+      catch (e) { return json({ error: 'ai_unavailable', detail: String(e.message || e) }, 502) }
+      if (!result || !result.sections) return json({ error: 'ai_bad_response' }, 502)
+
+      const version = {
+        id: uuidv4(), startup_id: session.startup_id, session_id,
+        title: result.title || `${startup?.name || 'Pitch'} — rewrite`,
+        sections: result.sections, flagged: result.flagged || [],
+        length: length || '90s', score: session.verdict?.final_score ?? null,
+        addressed_gaps: selected.map((g) => ({ id: g.id, category: g.category, severity: g.severity })),
+        created_at: new Date(), updated_at: new Date(),
+      }
+      await db.collection('pitch_versions').insertOne(version)
+      const { _id, ...clean } = version
+      return json(clean)
+    }
+
+    if (path[0] === 'versions' && path[1] && method === 'GET') {
+      const v = await db.collection('pitch_versions').findOne({ id: path[1] })
+      if (!v) return json({ error: 'not found' }, 404)
+      const { _id, ...clean } = v
+      return json(clean)
+    }
+
+    if (route === '/versions' && method === 'GET') {
+      const url = new URL(request.url)
+      const startupId = url.searchParams.get('startup_id')
+      const q = startupId ? { startup_id: startupId } : {}
+      const rows = await db.collection('pitch_versions').find(q).sort({ created_at: -1 }).limit(50).toArray()
+      return json(rows.map(({ _id, ...r }) => r))
+    }
+
+    if (path[0] === 'versions' && path[1] && method === 'PUT') {
+      const body = await request.json()
+      const set = { updated_at: new Date() }
+      if (body.sections) set.sections = body.sections
+      if (body.title) set.title = body.title
+      await db.collection('pitch_versions').updateOne({ id: path[1] }, { $set: set })
+      const v = await db.collection('pitch_versions').findOne({ id: path[1] })
+      const { _id, ...clean } = v
+      return json(clean)
+    }
+
+    // ---- FOUNDER STUDIO aggregate ----
+    if (route === '/studio' && method === 'GET') {
+      const url = new URL(request.url)
+      const startupId = url.searchParams.get('startup_id')
+      if (!startupId) return json({ error: 'startup_id required' }, 400)
+      const startup = await db.collection('startups').findOne({ id: startupId })
+      const sessions = await db.collection('sessions').find({ startup_id: startupId }).sort({ started_at: 1 }).toArray()
+      const versions = await db.collection('pitch_versions').find({ startup_id: startupId }).sort({ created_at: -1 }).toArray()
+
+      const claims = []
+      const gaps = []
+      const score_history = []
+      for (const s of sessions) {
+        for (const c of (s.claims || [])) claims.push({ ...c, round: s.round_number, session_id: s.id })
+        for (const g of (s.gaps || [])) gaps.push({ ...g, round: s.round_number, session_id: s.id })
+        if (s.verdict) {
+          const dims = {}; (s.scorecard || []).forEach((sc) => { dims[sc.dimension] = sc.score })
+          score_history.push({ round: s.round_number, session_id: s.id, score: s.verdict.final_score, verdict: s.verdict.verdict, dims })
+        }
+      }
+      const sessionSummaries = sessions.map(({ _id, transcript, ...r }) => ({ id: r.id, round_number: r.round_number, status: r.status, mode: r.mode, panel_name: r.panel_name, is_demo: r.is_demo || false, started_at: r.started_at, verdict: r.verdict ? { final_score: r.verdict.final_score, verdict: r.verdict.verdict } : null, turns: (transcript || []).length }))
+      return json({
+        startup: startup ? (({ _id, ...r }) => r)(startup) : null,
+        sessions: sessionSummaries,
+        claims: claims.map(({ _id, ...c }) => c),
+        gaps: gaps.map(({ _id, ...g }) => g),
+        versions: versions.map(({ _id, ...v }) => v),
+        score_history,
+      })
+    }
+
+    // ---- DEMO seed (FlowPay) ----
+    if (route === '/demo/seed' && method === 'POST') {
+      const body = await request.json()
+      const user_id = body?.user_id || null
+      let startup = await db.collection('startups').findOne({ user_id, is_demo: true, name: 'FlowPay' })
+      if (startup) {
+        const sessions = await db.collection('sessions').find({ startup_id: startup.id }).sort({ round_number: 1 }).toArray()
+        const { _id, ...cleanStartup } = startup
+        return json({ startup: cleanStartup, session_ids: sessions.map((s) => s.id) })
+      }
+      startup = {
+        id: uuidv4(), user_id, is_demo: true,
+        name: 'FlowPay', founder: 'Demo Founder', industry: 'Fintech', stage: 'Seed',
+        one_liner: 'UPI-based B2B payments platform for small merchants in India',
+        problem: 'Small merchants struggle to accept and reconcile digital payments reliably',
+        customer: 'Small B2B merchants in tier-2 Indian cities', solution: 'One-tap UPI collection + instant settlement + reconciliation',
+        business_model: 'Take rate per transaction', pricing: '0.4% per transaction', revenue: 'Early revenue',
+        customers: '50', cac: '\u20b9200 (claimed)', retention: 'Not yet shown', market_size: '\u20b94,000 crore (top-down)',
+        competitors: 'Razorpay, PhonePe for Business', differentiation: 'Faster settlement', moat: 'Merchant relationships',
+        gtm: 'Paid acquisition', traction: '50 paying merchants', fundraising_status: 'Raising seed', evidence: 'Limited',
+        created_at: new Date(), updated_at: new Date(),
+      }
+      await db.collection('startups').insertOne(startup)
+      const s1 = buildDemoSession1(startup.id, user_id)
+      const s2 = buildDemoSession2(startup.id, user_id)
+      // stamp session_id into claims
+      s1.claims = (s1.claims || []).map((c) => ({ ...c, session_id: s1.id }))
+      s1.gaps = (s1.gaps || []).map((g) => ({ ...g, session_id: s1.id }))
+      s2.gaps = (s2.gaps || []).map((g) => ({ ...g, session_id: s2.id }))
+      await db.collection('sessions').insertMany([s1, s2])
+      const { _id, ...cleanStartup } = startup
+      return json({ startup: cleanStartup, session_ids: [s1.id, s2.id] })
     }
 
     return json({ error: `Route ${route} not found` }, 404)

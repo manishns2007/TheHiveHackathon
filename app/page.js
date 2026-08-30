@@ -559,6 +559,12 @@ function PanelsView({ user, go, startup }) {
 
 // ================================================================== PITCH ROOM
 const STATUS_MSGS = ['Analyzing your claims...', 'Cross-checking evidence...', 'Updating investor beliefs...', 'The panel is forming a response...']
+// Distinct voice profiles per panel seat (index-based) for spoken persona replies
+const VOICE_PROFILES = [
+  { rate: 0.97, pitch: 0.82 },
+  { rate: 1.07, pitch: 1.14 },
+  { rate: 0.99, pitch: 1.0 },
+]
 
 function PitchRoomView({ user, go, sessionId }) {
   const [session, setSession] = useState(null)
@@ -566,68 +572,156 @@ function PitchRoomView({ user, go, sessionId }) {
   const [beliefs, setBeliefs] = useState({})
   const [transcript, setTranscript] = useState([])
   const [input, setInput] = useState('')
+  const [liveText, setLiveText] = useState('')
   const [thinking, setThinking] = useState(false)
   const [statusIdx, setStatusIdx] = useState(0)
   const [speaker, setSpeaker] = useState(null)
-  const [ttsOn, setTtsOn] = useState(false)
+  const [ttsOn, setTtsOn] = useState(true)
   const [listening, setListening] = useState(false)
+  const [micOn, setMicOn] = useState(false)
+  const [phase, setPhase] = useState('idle')
   const [micSupported, setMicSupported] = useState(true)
   const [elapsed, setElapsed] = useState(0)
   const [ending, setEnding] = useState(false)
   const scrollRef = useRef(null)
   const recogRef = useRef(null)
+  const finalRef = useRef('')
+  const silenceRef = useRef(null)
+  const submittingRef = useRef(false)
+  const submitRef = useRef(null)
+  const voicesRef = useRef([])
+  const personasRef = useRef([])
+  const phaseRef = useRef('idle')
+  const micOnRef = useRef(false)
+  const ttsOnRef = useRef(true)
+  const setPhaseBoth = (p) => { phaseRef.current = p; setPhase(p) }
+  const setTts = (v) => { ttsOnRef.current = v; setTtsOn(v); if (!v && typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel() }
 
   useEffect(() => {
     api('/sessions/' + sessionId).then((s) => {
-      setSession(s); setPersonas(s.panel_personas || []); setBeliefs(s.beliefs || {}); setTranscript(s.transcript || [])
+      setSession(s); setPersonas(s.panel_personas || []); personasRef.current = s.panel_personas || []; setBeliefs(s.beliefs || {}); setTranscript(s.transcript || [])
       if (s.verdict) go('debrief', { sessionId })
     }).catch(() => { toast.error('Could not load session'); go('dashboard') })
   }, [sessionId])
 
   useEffect(() => { const t = setInterval(() => setElapsed((e) => e + 1), 1000); return () => clearInterval(t) }, [])
   useEffect(() => { if (thinking) { const t = setInterval(() => setStatusIdx((i) => (i + 1) % STATUS_MSGS.length), 1400); return () => clearInterval(t) } }, [thinking])
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [transcript, thinking])
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [transcript, thinking, liveText])
 
   useEffect(() => {
     const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
     if (!SR) { setMicSupported(false); return }
-    const r = new SR(); r.continuous = false; r.interimResults = true; r.lang = 'en-IN'
-    r.onresult = (e) => { const txt = Array.from(e.results).map((x) => x[0].transcript).join(''); setInput(txt) }
-    r.onend = () => setListening(false); r.onerror = () => setListening(false)
+    const r = new SR(); r.continuous = true; r.interimResults = true; r.lang = 'en-IN'
+    r.onresult = (e) => {
+      let interim = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript
+        if (e.results[i].isFinal) finalRef.current += t + ' '
+        else interim += t
+      }
+      setLiveText((finalRef.current + interim).trim())
+      clearTimeout(silenceRef.current)
+      silenceRef.current = setTimeout(() => {
+        if (phaseRef.current !== 'listening' || !micOnRef.current) return
+        const text = finalRef.current.trim()
+        if (text.length >= 2 && submitRef.current) submitRef.current(text)
+      }, 1700)
+    }
+    r.onend = () => {
+      setListening(false)
+      // keep the mic alive for the whole conversation: auto-restart while actively listening
+      if (micOnRef.current && phaseRef.current === 'listening' && !submittingRef.current) {
+        try { r.start(); setListening(true) } catch (e) {}
+      }
+    }
+    r.onerror = () => { setListening(false) }
     recogRef.current = r
+    if (window.speechSynthesis) {
+      const load = () => { voicesRef.current = window.speechSynthesis.getVoices() }
+      load(); window.speechSynthesis.onvoiceschanged = load
+    }
+    return () => {
+      try { r.onend = null; r.onresult = null; r.stop() } catch (e) {}
+      try { window.speechSynthesis && window.speechSynthesis.cancel() } catch (e) {}
+      clearTimeout(silenceRef.current)
+    }
   }, [])
 
-  const toggleMic = () => {
+  const startMic = () => {
     if (!micSupported) return
-    if (listening) { recogRef.current?.stop(); setListening(false) }
-    else { try { recogRef.current?.start(); setListening(true) } catch (e) {} }
+    micOnRef.current = true; setMicOn(true)
+    finalRef.current = ''; setLiveText('')
+    setPhaseBoth('listening')
+    try { recogRef.current?.start(); setListening(true) } catch (e) {}
   }
-  const speak = (text) => {
-    if (!ttsOn || typeof window === 'undefined' || !window.speechSynthesis) return
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text); u.rate = 1.02; u.pitch = 0.95; window.speechSynthesis.speak(u)
+  const stopMic = () => {
+    micOnRef.current = false; setMicOn(false)
+    clearTimeout(silenceRef.current)
+    setPhaseBoth('idle'); setListening(false)
+    try { recogRef.current?.stop() } catch (e) {}
+    try { window.speechSynthesis && window.speechSynthesis.cancel() } catch (e) {}
+  }
+  const toggleMic = () => { if (micOnRef.current) stopMic(); else startMic() }
+
+  const applyVoice = (u, personaId) => {
+    const pl = personasRef.current || []
+    const idx = Math.max(0, pl.findIndex((p) => p.id === personaId))
+    const prof = VOICE_PROFILES[idx % VOICE_PROFILES.length]
+    u.rate = prof.rate; u.pitch = prof.pitch
+    const all = voicesRef.current || []
+    const eng = all.filter((v) => /^en/i.test(v.lang))
+    const pool = eng.length ? eng : all
+    if (pool.length) u.voice = pool[idx % pool.length]
+  }
+  const resumeListening = () => {
+    submittingRef.current = false
+    if (!micOnRef.current) { setPhaseBoth('idle'); return }
+    finalRef.current = ''; setLiveText('')
+    setPhaseBoth('listening')
+    try { recogRef.current?.start(); setListening(true) } catch (e) {}
+  }
+  const speakThen = (pm) => {
+    setPhaseBoth('speaking'); setSpeaker(pm.persona_id)
+    const done = () => { setSpeaker(null); resumeListening() }
+    if (!ttsOnRef.current || typeof window === 'undefined' || !window.speechSynthesis) { setTimeout(done, 500); return }
+    try {
+      window.speechSynthesis.cancel()
+      const u = new SpeechSynthesisUtterance(pm.content); applyVoice(u, pm.persona_id)
+      u.onend = done; u.onerror = done
+      window.speechSynthesis.speak(u)
+    } catch (e) { done() }
   }
   const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
-  const send = async () => {
-    const msg = input.trim()
-    if (!msg || thinking) return
-    setInput(''); if (listening) toggleMic()
+  const submitTurn = async (text) => {
+    const msg = (text || '').trim()
+    if (!msg || submittingRef.current || thinking) return
+    submittingRef.current = true
+    clearTimeout(silenceRef.current)
+    finalRef.current = ''; setLiveText(''); setInput('')
+    setPhaseBoth('thinking'); setListening(false)
+    try { recogRef.current?.stop() } catch (e) {}
     setTranscript((t) => [...t, { id: 'f' + Date.now(), role: 'founder', content: msg }])
     setThinking(true); setStatusIdx(0)
     try {
       const res = await api('/pitch/turn', { method: 'POST', body: { session_id: sessionId, message: msg } })
-      setBeliefs(res.beliefs); setSpeaker(res.persona_message.persona_id)
+      setBeliefs(res.beliefs)
       setTranscript((t) => [...t, res.persona_message])
       if (res.contradictions?.length) toast.error(`${res.contradictions.length} contradiction${res.contradictions.length > 1 ? 's' : ''} detected`)
-      speak(res.persona_message.content)
-      setTimeout(() => setSpeaker(null), 1200)
-    } catch (err) { toast.error('The panel is experiencing a brief delay. Please try again.') }
-    finally { setThinking(false) }
+      setThinking(false)
+      speakThen(res.persona_message)
+    } catch (err) {
+      toast.error('The panel is experiencing a brief delay. Please try again.')
+      setThinking(false); resumeListening()
+    }
   }
+  submitRef.current = submitTurn
 
   const endPitch = async () => {
     if (transcript.length < 2) { toast.error('Say at least one thing before ending.'); return }
+    micOnRef.current = false; setMicOn(false)
+    try { recogRef.current?.stop() } catch (e) {}
+    try { window.speechSynthesis && window.speechSynthesis.cancel() } catch (e) {}
     setEnding(true)
     try { await api('/pitch/end', { method: 'POST', body: { session_id: sessionId } }); go('debrief', { sessionId }) }
     catch (err) { toast.error('Deliberation failed. Try again.'); setEnding(false) }
@@ -646,7 +740,7 @@ function PitchRoomView({ user, go, sessionId }) {
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="border-emerald-200 text-emerald-700 bg-emerald-50 text-[10px]">AI SIMULATION</Badge>
-            <Button size="icon" variant="ghost" onClick={() => setTtsOn((v) => !v)} title="Toggle voice">{ttsOn ? <Volume2 className="w-4 h-4 text-brand" /> : <VolumeX className="w-4 h-4 text-neutral-400" />}</Button>
+            <Button size="icon" variant="ghost" onClick={() => setTts(!ttsOn)} title="Toggle panel voice">{ttsOn ? <Volume2 className="w-4 h-4 text-brand" /> : <VolumeX className="w-4 h-4 text-neutral-400" />}</Button>
             <Button size="sm" variant="destructive" onClick={endPitch} disabled={ending}>{ending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'End pitch'}</Button>
           </div>
         </div>
@@ -681,44 +775,114 @@ function PitchRoomView({ user, go, sessionId }) {
         </div>
       </div>
 
-      {/* conversation */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto container pb-4">
-        <div className="space-y-4 max-w-4xl mx-auto">
-          {transcript.length === 0 && (
+      {/* LIVE TRANSCRIPTION STAGE */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto container pb-44">
+        <div className="space-y-5 max-w-2xl mx-auto pt-2">
+          {transcript.length === 0 && !liveText && (
             <div className="text-center py-16">
-              <Sparkles className="w-8 h-8 text-brand mx-auto mb-3" />
-              <h3 className="text-lg font-semibold text-neutral-900">The panel is ready.</h3>
-              <p className="text-neutral-500 mt-1 text-sm">Open with your pitch. Be specific — they will check your numbers.</p>
+              <div className="w-14 h-14 rounded-full brand-gradient grid place-items-center mx-auto mb-4"><Mic className="w-6 h-6 text-white" /></div>
+              <h3 className="text-lg font-semibold text-neutral-900">The panel is listening.</h3>
+              <p className="text-neutral-500 mt-1 text-sm max-w-md mx-auto">Tap the mic below and just talk. Your words appear here live, and the panel replies out loud — a real back-and-forth conversation.</p>
             </div>
           )}
-          {transcript.map((m) => <MessageBubble key={m.id} m={m} personas={personas} />)}
+          {transcript.map((m) => <PitchCaption key={m.id} m={m} personas={personas} speaking={speaker === m.persona_id && m.role !== 'founder'} />)}
           {thinking && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3 text-neutral-500">
               <Loader2 className="w-4 h-4 animate-spin text-brand" /><span className="text-sm">{STATUS_MSGS[statusIdx]}</span>
             </motion.div>
           )}
+          {liveText && phase === 'listening' && (
+            <div className="flex flex-col items-start">
+              <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-brand mb-1"><span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" /> You · speaking</span>
+              <p className="text-[17px] leading-relaxed text-neutral-900 max-w-2xl">{liveText}<span className="inline-block w-0.5 h-5 bg-brand ml-0.5 align-middle animate-pulse" /></p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* input */}
+      {/* AUDIO CONTROL BAR */}
       <div className="bg-white/90 backdrop-blur-md border-t border-neutral-100 sticky bottom-0">
-        <div className="container py-3 max-w-4xl mx-auto">
-          <div className="flex items-end gap-2">
-            {micSupported && (
-              <button onClick={toggleMic} className={`shrink-0 w-11 h-11 rounded-full grid place-items-center transition-all ${listening ? 'bg-brand mic-pulse' : 'bg-[#f0f1ec] hover:bg-neutral-200'}`}>
-                <Mic className={`w-5 h-5 ${listening ? 'text-white' : 'text-neutral-500'}`} />
+        <div className="container py-4">
+          {micSupported ? (
+            <div className="flex flex-col items-center gap-2">
+              <button onClick={toggleMic} disabled={phase === 'thinking'} title={micOn ? 'Pause microphone' : 'Start speaking'}
+                className={`relative w-16 h-16 rounded-full grid place-items-center transition-all disabled:opacity-60 ${micOn && phase === 'listening' ? 'bg-brand mic-pulse' : 'bg-neutral-900 hover:bg-neutral-800'}`}>
+                {phase === 'thinking' ? <Loader2 className="w-6 h-6 text-white animate-spin" /> : phase === 'speaking' ? <Volume2 className="w-6 h-6 text-white" /> : <Mic className="w-6 h-6 text-white" />}
               </button>
-            )}
-            <Textarea value={input} onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-              placeholder={listening ? 'Listening...' : 'Make your pitch. Answer their questions...'} rows={1}
-              className="resize-none min-h-[44px] max-h-32 bg-[#f7f8f4]" />
-            <Button onClick={send} disabled={thinking || !input.trim()} className="shrink-0 h-11 rounded-lg"><Send className="w-4 h-4" /></Button>
-          </div>
-          {!micSupported && <p className="text-[11px] text-neutral-400 mt-1.5">Voice input isn’t supported in this browser — type your pitch instead.</p>}
+              <div className="text-center">
+                <p className="text-sm font-medium text-neutral-900">
+                  {!micOn ? 'Tap to start the conversation'
+                    : phase === 'listening' ? 'Listening — just speak, pause when you\u2019re done'
+                    : phase === 'thinking' ? 'The panel is considering your answer\u2026'
+                    : phase === 'speaking' ? 'The panel is responding\u2026'
+                    : 'Mic on'}
+                </p>
+                {micOn && <p className="text-[11px] text-neutral-400 mt-0.5">Mic stays on for the whole conversation · tap to pause</p>}
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-2xl mx-auto">
+              <p className="text-[11px] text-neutral-400 mb-1.5">Voice input isn\u2019t supported in this browser — type your answer instead.</p>
+              <div className="flex items-end gap-2">
+                <Textarea value={input} onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (input.trim()) submitTurn(input.trim()) } }}
+                  placeholder="Type your pitch\u2026" rows={1} className="resize-none min-h-[44px] max-h-32 bg-[#f7f8f4]" />
+                <Button onClick={() => input.trim() && submitTurn(input.trim())} disabled={thinking || !input.trim()} className="shrink-0 h-11 rounded-lg"><Send className="w-4 h-4" /></Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
+  )
+}
+
+function PitchCaption({ m, personas, speaking }) {
+  if (m.role === 'founder') {
+    return (
+      <div className="flex flex-col items-start">
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 mb-1">You</span>
+        <p className="text-[17px] leading-relaxed text-neutral-800 max-w-2xl whitespace-pre-wrap">{m.content}</p>
+      </div>
+    )
+  }
+  const persona = personas.find((p) => p.id === m.persona_id)
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`rounded-2xl border p-4 transition-all ${speaking ? 'border-emerald-300 bg-emerald-50/40 shadow-[0_0_0_3px_rgba(34,197,94,0.10)]' : 'border-neutral-200 bg-[#f7f8f4]'}`}>
+      <div className="flex items-center gap-2.5 mb-2">
+        <img src={m.avatar_url || persona?.avatar_url} alt={m.personaName} className="w-8 h-8 rounded-full object-cover border border-neutral-200" />
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="text-sm font-semibold text-neutral-900 truncate">{m.personaName}</span>
+          <span className="text-[11px] text-neutral-500 truncate">{m.personaRole}</span>
+        </div>
+        {speaking && <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-brand shrink-0"><Volume2 className="w-3 h-3" /> speaking</span>}
+      </div>
+      <p className="text-[17px] leading-relaxed text-neutral-800 whitespace-pre-wrap">{m.content}</p>
+      {m.question?.text && (
+        <div className="mt-3 pt-3 border-t border-neutral-200 text-[15px] text-neutral-900 flex gap-2">
+          <Target className="w-4 h-4 shrink-0 mt-0.5 text-brand" /> {m.question.text}
+        </div>
+      )}
+      {(m.contradictions || []).map((c, i) => (
+        <div key={i} className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 flex gap-2">
+          <ShieldAlert className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+          <div><div className="text-xs font-semibold text-red-700">Contradiction · {c.severity}</div><div className="text-xs text-red-600/80 mt-0.5">{c.explanation}</div></div>
+        </div>
+      ))}
+      {(m.beliefChanges || []).length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {m.beliefChanges.map((b, i) => {
+            const down = b.new < b.previous
+            return (
+              <span key={i} className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border ${down ? 'border-red-200 text-red-700 bg-red-50' : 'border-emerald-200 text-emerald-700 bg-emerald-50'}`}>
+                {down ? <TrendingDown className="w-3 h-3" /> : <TrendingUp className="w-3 h-3" />}
+                {DIM_LABELS[b.dimension] || b.dimension} {b.previous}→{b.new}
+              </span>
+            )
+          })}
+        </div>
+      )}
+    </motion.div>
   )
 }
 

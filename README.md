@@ -1,4 +1,4 @@
-# ⚡ EchoClash
+# EchoClash
 
 ### Put your startup through an AI investment committee.
 
@@ -10,7 +10,7 @@ EchoClash is designed as the **simulation layer between founders and the real ca
 
 ---
 
-## 🎯 Why EchoClash?
+##  Why EchoClash?
 
 Most pitch-practice tools generate questions or provide generic AI feedback.
 
@@ -32,7 +32,7 @@ The same startup can therefore receive **different questions, objections, scores
 
 ---
 
-## 🧠 Core Innovation
+## Core Innovation
 
 ### A persona is not just a prompt.
 
@@ -76,7 +76,7 @@ Both can evaluate the same pitch and arrive at different conclusions.
 
 ---
 
-# 🚀 Core Features
+#  Core Features
 
 ## 1. Adversarial Pitch Simulation
 
@@ -156,7 +156,7 @@ Personas use different evaluation weights, evidence requirements, questioning pr
 
 ---
 
-# 🔎 Claim & Evidence Intelligence
+#  Claim & Evidence Intelligence
 
 EchoClash extracts structured information from founder statements.
 
@@ -185,7 +185,7 @@ This prevents the AI from treating every founder statement as established fact.
 
 ---
 
-# ⚠️ Contradiction Detection
+#  Contradiction Detection
 
 EchoClash continuously compares new statements with previously established claims.
 
@@ -237,7 +237,7 @@ The panel can then cross-reference the earlier statement and challenge the found
 
 ---
 
-# 🎙️ Two-Phase Pitch Experience
+#  Two-Phase Pitch Experience
 
 EchoClash separates pitching from questioning.
 
@@ -269,7 +269,7 @@ The session timer pauses while the panel is asking or thinking and advances whil
 
 ---
 
-# 🧩 Structured Belief State
+#  Structured Belief State
 
 Every investor maintains an evolving belief state.
 
@@ -317,7 +317,7 @@ CAC contradiction reduced investor confidence.
 
 ---
 
-# 🧠 Investor Memory
+#  Investor Memory
 
 EchoClash maintains multiple layers of memory.
 
@@ -458,7 +458,7 @@ The debrief provides:
 
 ---
 
-# 🚨 Gap Analysis
+#  Gap Analysis
 
 Weaknesses are converted into actionable gaps.
 
@@ -494,7 +494,7 @@ RESOLVED
 
 ---
 
-# ✍️ AI Pitch Rewrite
+#  AI Pitch Rewrite
 
 After identifying weaknesses, founders can select the gaps they want to fix.
 
@@ -541,7 +541,7 @@ The founder remains the final author.
 
 ---
 
-# 📝 Pitch Editor
+#  Pitch Editor
 
 Generated pitches can be edited before being used again.
 
@@ -574,7 +574,7 @@ Features include:
 
 ---
 
-# 🔄 Re-Pitch
+#  Re-Pitch
 
 EchoClash is built around iterative improvement.
 
@@ -604,7 +604,7 @@ Founders can compare:
 
 ---
 
-# 🎮 Demo Mode
+#  Demo Mode
 
 EchoClash includes a deterministic fictional startup:
 
@@ -630,7 +630,7 @@ This makes the project suitable for **hackathon demos and offline demonstrations
 
 ---
 
-# 🏗️ Architecture
+#  Architecture
 
 ```text
                     ┌─────────────────────┐
@@ -681,7 +681,7 @@ The documented implementation uses React/TypeScript, FastAPI, Supabase PostgreSQ
 
 ---
 
-# 📁 Core Data Model
+#  Core Data Model
 
 The application uses structured relational entities including:
 
@@ -706,7 +706,7 @@ These entities preserve the startup's evolving state rather than relying solely 
 
 ---
 
-# 🔐 Safety & Trust
+#  Safety & Trust
 
 EchoClash is designed to clearly distinguish:
 
@@ -734,7 +734,7 @@ The system:
 
 ---
 
-# 🎨 Design Philosophy
+#  Design Philosophy
 
 EchoClash uses a **cinematic AI investment war-room aesthetic**.
 
@@ -755,7 +755,7 @@ The goal is to make a pitch session feel like entering a **real investment commi
 
 ---
 
-# ⚙️ Local Development
+#  Local Development
 
 ## Prerequisites
 
@@ -821,7 +821,7 @@ uvicorn main:app --reload
 
 ---
 
-# 🔑 Environment Variables
+#  Environment Variables
 
 Create the required environment files based on your deployment configuration.
 
@@ -840,7 +840,7 @@ DATABASE_URL=your_database_url
 
 ---
 
-# 🎬 Demo Flow
+#  Demo Flow
 
 The recommended demonstration flow is:
 
@@ -882,7 +882,7 @@ Re-Pitch
 
 ---
 
-# 🧪 Current Demo Scenario
+#  Current Demo Scenario
 
 The included fictional **FlowPay** scenario demonstrates the core intelligence loop.
 
@@ -910,7 +910,7 @@ Seeded demo sessions include an initial score of **61 / Needs More Evidence** an
 
 ---
 
-# 📈 Product Roadmap
+#  Product Roadmap
 
 ### V1 — Core Intelligence
 
@@ -944,7 +944,7 @@ The project documentation explicitly prioritizes the core simulation and improve
 
 ---
 
-# 💡 What Makes EchoClash Different?
+#  What Makes EchoClash Different?
 
 | Traditional Pitch Practice    | EchoClash                         |
 | ----------------------------- | --------------------------------- |
@@ -974,7 +974,7 @@ EchoClash is designed for:
 
 ---
 
-# 🌟 Product Vision
+#  Product Vision
 
 > **The best pitch practice isn't practicing the same pitch again.**
 >
@@ -984,7 +984,7 @@ EchoClash aims to become the **simulation layer between founders and the real ca
 
 ---
 
-# ⚠️ Disclaimer
+#  Disclaimer
 
 EchoClash is an AI simulation platform.
 
@@ -994,13 +994,11 @@ Investor personas are fictional simulations designed for pitch practice.
 
 ---
 
-# 📜 License
+#  License
 ```
 MIT License
 ```
 
 ---
-
-## Built with ⚡ for founders who want to be challenged.
 
 **EchoClash — Don't just practice your pitch. Stress test it.**
